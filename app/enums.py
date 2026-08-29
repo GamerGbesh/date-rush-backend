@@ -11,6 +11,7 @@ class UserState(StrEnum):
     QUEUED = "queued"
     IN_GAME = "in_game"
     MATCHED = "matched"
+    COMPLETED = "completed"
 
 
 class PlayerRole(StrEnum):
@@ -26,6 +27,7 @@ class RoomState(StrEnum):
     VOTING = "voting"
     ELIMINATION = "elimination"
     ONE_ON_ONE = "one_on_one"
+    FINAL_SELECTION = "final_selection"
     FINAL = "final"
     MATCHED = "matched"
     COMPLETED = "completed"
@@ -52,5 +54,35 @@ class ParticipantStatus(StrEnum):
     ELIMINATED = "eliminated"
     FINALIST = "finalist"
     SELECTED = "selected"
+
+
+class OneOnOneSessionState(StrEnum):
+    PENDING = "pending"
+    ACTIVE = "active"
+    ANSWERED = "answered"
+    VOTING = "voting"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    COMPLETED = "completed"
+
+
+class VotePhase(StrEnum):
+    PUBLIC = "public"
+    PRIVATE = "private"
+
+
+class MatchStatus(StrEnum):
+    CREATED = "created"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+
+class MatchRoomState(StrEnum):
+    WAITING_FOR_CONTACTS = "waiting_for_contacts"
+    CONTACTS_EXCHANGED = "contacts_exchanged"
+    COMPLETED = "completed"
+
+
+
 
 

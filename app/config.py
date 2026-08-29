@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     # Number of public question rounds configured for each room.
     PUBLIC_QUESTION_ROUNDS: int = 3
 
+    # Maximum length for free-form private one-on-one questions.
+    PRIVATE_QUESTION_MAX_LENGTH: int = 500
+
+    # Maximum length for contact information fields (WhatsApp / Snapchat).
+    CONTACT_MAX_LENGTH: int = 100
 
 
 settings = Settings()
+

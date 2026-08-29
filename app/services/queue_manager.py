@@ -37,6 +37,11 @@ class QueueManager:
 
     def add(self, db: Session, user: User) -> None:
         """Place a user into their gender queue (state → QUEUED, queued_at set)."""
+        if user.state == UserState.COMPLETED:
+            from app.exceptions import UserAlreadyCompletedEventError
+
+            raise UserAlreadyCompletedEventError(user.id)
+
         user.state = UserState.QUEUED
         user.queued_at = datetime.now(timezone.utc)
         db.commit()

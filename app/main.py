@@ -4,12 +4,14 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
 from app.api.admin import router as admin_router
+from app.api.match_rooms import router as match_rooms_router
+from app.api.matches import router as matches_router
 from app.api.queue import router as queue_router
 from app.api.rooms import router as rooms_router
 from app.api.users import router as users_router
 from app.api.ws import router as ws_router
 from app.database import init_db
-from app.exceptions import InvalidRoomTransitionError, RoomNotFoundError
+from app.exceptions import InvalidRoomTransitionError, MatchRoomNotFoundError, RoomNotFoundError
 
 
 @asynccontextmanager
@@ -29,8 +31,12 @@ app = FastAPI(
 app.include_router(users_router)
 app.include_router(queue_router)
 app.include_router(rooms_router)
+app.include_router(matches_router)
+app.include_router(match_rooms_router)
 app.include_router(admin_router)
 app.include_router(ws_router)
+
+
 
 
 @app.exception_handler(InvalidRoomTransitionError)

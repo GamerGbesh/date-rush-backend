@@ -244,15 +244,18 @@ Votes belong to a specific round, not just a room. This allows the system to tal
 ```
 matches
 ├── id            INTEGER PRIMARY KEY AUTOINCREMENT
-├── room_id       INTEGER  NOT NULL  → rooms.id
+├── room_id       INTEGER  NOT NULL  → rooms.id (UNIQUE)
 ├── challenger_id INTEGER  NOT NULL  → users.id
 ├── audience_id   INTEGER  NOT NULL  → users.id
+├── status        ENUM('CREATED', 'COMPLETED', 'CANCELLED')  NOT NULL  DEFAULT 'CREATED'
 └── created_at    DATETIME WITH TIMEZONE  NOT NULL
+
+UNIQUE (room_id)   ← uq_match_room_id
 ```
 
 ### Purpose
 
-Records the final pairing produced by a room. When only one audience member remains (`RoomState.FINAL`), a `Match` record is created linking them to the challenger.
+Records the final pairing produced by a room. When the challenger selects a finalist (or when a single survivor remains after 1-on-1), a `Match` record is created linking the challenger and the matched audience member.
 
 ### Contact sharing not yet implemented
 
@@ -303,6 +306,82 @@ UNIQUE (room_id, question_id)
 ### Purpose
 
 Persists the randomized, gender-filtered question sequence determined at room creation time.
+
+---
+
+## `OneOnOneSession`
+
+**File:** [`app/models/one_on_one_session.py`](../app/models/one_on_one_session.py)
+
+```
+one_on_one_sessions
+├── id            INTEGER PRIMARY KEY AUTOINCREMENT
+├── room_id       INTEGER  NOT NULL  → rooms.id
+├── audience_id   INTEGER  NOT NULL  → users.id
+├── challenger_id INTEGER  NOT NULL  → users.id
+├── sequence      INTEGER  NOT NULL
+├── state         ENUM('PENDING', 'ACTIVE', 'ANSWERED', 'VOTING', 'ACCEPTED', 'REJECTED', 'COMPLETED')
+├── question      VARCHAR(500)  NULL
+├── answer        VARCHAR(1000)  NULL
+├── vote          ENUM('YES', 'NO')  NULL
+├── started_at    DATETIME WITH TIMEZONE  NULL
+├── answered_at   DATETIME WITH TIMEZONE  NULL
+├── voted_at      DATETIME WITH TIMEZONE  NULL
+├── completed_at  DATETIME WITH TIMEZONE  NULL
+└── created_at    DATETIME WITH TIMEZONE  NOT NULL
+
+UNIQUE (room_id, sequence)
+UNIQUE (room_id, audience_id)
+```
+
+### Purpose
+
+Tracks the sequential 1-on-1 private sessions between the challenger and each surviving audience member, along with their private question, answer, and mandatory private vote.
+
+---
+
+## `MatchRoom`
+
+**File:** [`app/models/match_room.py`](../app/models/match_room.py)
+
+```
+match_rooms
+├── id           INTEGER PRIMARY KEY AUTOINCREMENT
+├── match_id     INTEGER  NOT NULL  → matches.id (UNIQUE)
+├── state        ENUM('WAITING_FOR_CONTACTS', 'CONTACTS_EXCHANGED', 'COMPLETED')  NOT NULL  DEFAULT 'WAITING_FOR_CONTACTS'
+├── created_at   DATETIME WITH TIMEZONE  NOT NULL
+└── completed_at DATETIME WITH TIMEZONE  NULL
+
+UNIQUE (match_id)   ← uq_match_room_match_id
+```
+
+### Purpose
+
+Dedicated private post-match room for collecting and exchanging contact details between the two matched participants.
+
+---
+
+## `MatchContact`
+
+**File:** [`app/models/match_contact.py`](../app/models/match_contact.py)
+
+```
+match_contacts
+├── id            INTEGER PRIMARY KEY AUTOINCREMENT
+├── match_room_id INTEGER  NOT NULL  → match_rooms.id
+├── user_id       INTEGER  NOT NULL  → users.id
+├── whatsapp      VARCHAR(100)  NULL
+├── snapchat      VARCHAR(100)  NULL
+└── submitted_at  DATETIME WITH TIMEZONE  NOT NULL
+
+UNIQUE (match_room_id, user_id)   ← uq_match_room_user_contact
+```
+
+### Purpose
+
+Stores the WhatsApp and/or Snapchat handle submitted by a matched participant for that specific match. It is not part of the user's permanent profile.
+
+
 
 
 

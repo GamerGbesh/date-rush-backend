@@ -12,11 +12,20 @@ class TestGender:
 
 class TestUserState:
     def test_all_states_present(self):
-        expected = {"waiting", "queued", "in_game", "matched"}
+        expected = {"waiting", "queued", "in_game", "matched", "completed"}
         assert {s.value for s in UserState} == expected
 
     def test_in_game_value(self):
         assert UserState.IN_GAME == "in_game"
+
+
+class TestMatchRoomState:
+    def test_values(self):
+        from app.enums import MatchRoomState
+        assert MatchRoomState.WAITING_FOR_CONTACTS == "waiting_for_contacts"
+        assert MatchRoomState.CONTACTS_EXCHANGED == "contacts_exchanged"
+        assert MatchRoomState.COMPLETED == "completed"
+
 
 
 class TestPlayerRole:
@@ -29,7 +38,7 @@ class TestRoomState:
     def test_all_states_present(self):
         expected = {
             "waiting", "ready", "intro", "questioning",
-            "voting", "elimination", "one_on_one", "final", "matched", "completed",
+            "voting", "elimination", "one_on_one", "final_selection", "final", "matched", "completed",
         }
         assert {s.value for s in RoomState} == expected
 

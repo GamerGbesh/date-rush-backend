@@ -48,6 +48,9 @@ class Room(Base):
     current_question: Mapped["Question | None"] = relationship(
         "Question", foreign_keys=[current_question_id], lazy="select"
     )
+    one_on_one_sessions: Mapped[list["OneOnOneSession"]] = relationship(
+        "OneOnOneSession", back_populates="room", lazy="select", order_by="OneOnOneSession.sequence"
+    )
 
 
 class RoomParticipant(Base):

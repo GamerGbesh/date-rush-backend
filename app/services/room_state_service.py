@@ -25,8 +25,9 @@ VALID_TRANSITIONS: dict[RoomState, set[RoomState]] = {
     RoomState.QUESTIONING: {RoomState.VOTING},
     RoomState.VOTING: {RoomState.ELIMINATION},
     RoomState.ELIMINATION: {RoomState.QUESTIONING, RoomState.ONE_ON_ONE, RoomState.FINAL, RoomState.COMPLETED},
-    RoomState.ONE_ON_ONE: {RoomState.FINAL},
-    RoomState.FINAL: {RoomState.MATCHED},
+    RoomState.ONE_ON_ONE: {RoomState.FINAL_SELECTION, RoomState.FINAL, RoomState.MATCHED, RoomState.COMPLETED},
+    RoomState.FINAL_SELECTION: {RoomState.MATCHED, RoomState.COMPLETED},
+    RoomState.FINAL: {RoomState.MATCHED, RoomState.COMPLETED},
     RoomState.MATCHED: {RoomState.COMPLETED},
     RoomState.COMPLETED: set(),
     # Retain WAITING -> READY for backwards compatibility if needed
@@ -126,6 +127,37 @@ class RoomStateService:
                     "type": "voting_started",
                     "room_id": room.id,
                     "total_voters": active_voters_count,
+                },
+            )
+
+        # When entering ONE_ON_ONE, automatically initialize 1-on-1 sessions
+        if target_state == RoomState.ONE_ON_ONE:
+            from app.services.one_on_one_service import one_on_one_service
+            await one_on_one_service.initialize_sessions_for_room(db, room)
+
+        # When entering FINAL_SELECTION, notify challenger privately and broadcast to room
+        if target_state == RoomState.FINAL_SELECTION:
+            from app.services.match_service import match_service
+            finalist_users = match_service.get_eligible_finalists(db, room.id)
+            # Private event to challenger
+            if room.challenger_id is not None:
+                await ws_manager.send_to_user(
+                    room.id,
+                    room.challenger_id,
+                    {
+                        "type": "final_selection_started",
+                        "room_id": room.id,
+                        "candidates": [
+                            {"id": u.id, "name": u.name} for u in finalist_users
+                        ],
+                    },
+                )
+            # Generic room-wide event
+            await ws_manager.broadcast(
+                room.id,
+                {
+                    "type": "final_selection_started",
+                    "room_id": room.id,
                 },
             )
 
