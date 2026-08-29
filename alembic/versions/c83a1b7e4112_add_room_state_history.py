@@ -27,8 +27,9 @@ roomstate_enum = postgresql.ENUM(
 
 def upgrade() -> None:
     """Upgrade schema."""
+    context = op.get_context()
+    is_postgres = context.dialect.name == 'postgresql'
     bind = op.get_bind()
-    is_postgres = bind.dialect.name == 'postgresql'
 
     roomstate_col = roomstate_enum if is_postgres else sa.Enum(
         'WAITING', 'READY', 'INTRO', 'QUESTIONING', 'VOTING', 'ELIMINATION', 'FINAL', 'MATCHED', 'COMPLETED',

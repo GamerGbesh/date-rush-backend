@@ -35,6 +35,8 @@ def upgrade() -> None:
         else:
             op.execute("CREATE TYPE matchroomstate AS ENUM ('WAITING_FOR_CONTACTS', 'CONTACTS_EXCHANGED', 'COMPLETED')")
 
+        op.execute("ALTER TYPE userstate ADD VALUE IF NOT EXISTS 'COMPLETED'")
+
     state_col = matchroomstate_enum if is_postgres else sa.Enum(
         'WAITING_FOR_CONTACTS', 'CONTACTS_EXCHANGED', 'COMPLETED', name='matchroomstate'
     )

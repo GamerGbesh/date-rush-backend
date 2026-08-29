@@ -40,6 +40,9 @@ def upgrade() -> None:
             op.execute("CREATE TYPE oneononesessionstate AS ENUM ('PENDING', 'ACTIVE', 'ANSWERED', 'VOTING', 'ACCEPTED', 'REJECTED', 'COMPLETED')")
             op.execute("CREATE TYPE votechoice AS ENUM ('YES', 'NO')")
 
+        op.execute("ALTER TYPE roomstate ADD VALUE IF NOT EXISTS 'ONE_ON_ONE'")
+        op.execute("ALTER TYPE roomstate ADD VALUE IF NOT EXISTS 'FINAL_SELECTION'")
+
     state_col = oneononesessionstate_enum if is_postgres else sa.Enum(
         'PENDING', 'ACTIVE', 'ANSWERED', 'VOTING', 'ACCEPTED', 'REJECTED', 'COMPLETED',
         name='oneononesessionstate',
