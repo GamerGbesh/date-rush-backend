@@ -89,10 +89,10 @@ class TestE2ELifecycleAPI:
         db.refresh(room)
         assert room.state == RoomState.ONE_ON_ONE
 
-        # Verify Guy 3 and 4 are eliminated and returned to QUEUED
+        # Verify Guy 3 and 4 are eliminated and set to WAITING
         for idx in range(3, 5):
             u_elim = db.get(User, male_ids[idx])
-            assert u_elim.state == UserState.QUEUED
+            assert u_elim.state == UserState.WAITING
 
         # --- 5. Sequential One-on-One Sessions ---
         # Retrieve 1-on-1 status

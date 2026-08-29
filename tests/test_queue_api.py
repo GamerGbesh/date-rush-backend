@@ -137,3 +137,20 @@ class TestAdminRooms:
         response = client.get("/admin/rooms")
         rooms = response.json()
         assert len(rooms) == 2
+
+
+class TestRejoinQueue:
+    def test_rejoin_existing_user_returns_queued(self, client):
+        join_res = client.post("/queue/join", json={"name": "Kofi", "gender": "male"})
+        user_id = join_res.json()["user_id"]
+
+        rejoin_res = client.post("/queue/rejoin", json={"user_id": user_id})
+        assert rejoin_res.status_code == 200
+        data = rejoin_res.json()
+        assert data["user_id"] == user_id
+        assert data["state"] == UserState.QUEUED
+
+    def test_rejoin_nonexistent_user_returns_404(self, client):
+        rejoin_res = client.post("/queue/rejoin", json={"user_id": 99999})
+        assert rejoin_res.status_code == 404
+

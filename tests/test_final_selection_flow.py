@@ -81,8 +81,7 @@ class TestFinalSelectionFlow:
         # Non-selected finalists (Finalist 0 and 2) are ELIMINATED and returned to QUEUED
         for idx in [0, 2]:
             db.refresh(finalists[idx])
-            assert finalists[idx].state == UserState.QUEUED
-            assert finalists[idx].queued_at is not None
+            assert finalists[idx].state == UserState.WAITING
             p_other = db.get(RoomParticipant, (room.id, finalists[idx].id))
             assert p_other.status == ParticipantStatus.ELIMINATED
             assert p_other.left_at is not None

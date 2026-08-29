@@ -63,8 +63,7 @@ class TestVotingFlow:
         u0 = db.get(User, audience[0].id)
         u1 = db.get(User, audience[1].id)
         assert u0.state == UserState.IN_GAME
-        assert u1.state == UserState.QUEUED
-        assert u1.queued_at is not None
+        assert u1.state == UserState.WAITING
 
     @pytest.mark.asyncio
     async def test_single_survivor_transitions_to_final(self, client, db):

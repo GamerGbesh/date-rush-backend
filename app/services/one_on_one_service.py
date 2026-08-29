@@ -138,8 +138,7 @@ class OneOnOneService:
 
             user = db.get(User, session.audience_id)
             if user:
-                user.state = UserState.QUEUED
-                user.queued_at = now
+                user.state = UserState.WAITING
 
             db.commit()
 
@@ -534,8 +533,7 @@ class OneOnOneService:
 
             user = db.get(User, session.audience_id)
             if user:
-                user.state = UserState.QUEUED
-                user.queued_at = now
+                user.state = UserState.WAITING
 
             db.commit()
             db.refresh(session)
@@ -693,8 +691,7 @@ class OneOnOneService:
                             p_challenger.left_at = datetime.now(timezone.utc)
                             c_user = db.get(User, p_challenger.user_id)
                             if c_user:
-                                c_user.state = UserState.QUEUED
-                                c_user.queued_at = datetime.now(timezone.utc)
+                                c_user.state = UserState.WAITING
                             db.commit()
                             await ws_manager.send_to_user(
                                 room.id,
@@ -704,11 +701,6 @@ class OneOnOneService:
                             ws_manager.disconnect(room.id, p_challenger.user_id)
 
                     await room_state_service.transition(db, room.id, RoomState.COMPLETED)
-
-                # Trigger queue manager room creation check for newly re-queued users
-                from app.services.queue_manager import queue_manager
-
-                queue_manager.try_create_rooms(db)
 
 
 one_on_one_service = OneOnOneService()

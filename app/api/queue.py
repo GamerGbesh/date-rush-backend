@@ -1,13 +1,13 @@
 import logging
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.room import RoomParticipant
 from app.models.user import User
-from app.schemas.queue import QueueJoinRequest, QueueJoinResponse, QueueStatusResponse
+from app.schemas.queue import QueueJoinRequest, QueueJoinResponse, QueueRejoinRequest, QueueStatusResponse
 from app.services.queue_manager import queue_manager
 from app.enums import Gender, UserState
 
@@ -65,6 +65,37 @@ def join_queue(payload: QueueJoinRequest, db: Session = Depends(get_db)) -> Queu
     return QueueJoinResponse(user_id=user.id, state=user.state, room_id=room_id)
 
 
+@router.post("/rejoin", response_model=QueueJoinResponse)
+def rejoin_queue(payload: QueueRejoinRequest, db: Session = Depends(get_db)) -> QueueJoinResponse:
+    """
+    Explicitly place an existing user (after elimination, declined, or game complete) back into the queue.
+    """
+    logger.info("Rejoin queue request received for user_id=%d", payload.user_id)
+    user = db.get(User, payload.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail=f"User {payload.user_id} not found.")
+
+    queue_manager.add(db, user)
+    created_rooms = queue_manager.try_create_rooms(db)
+    if created_rooms:
+        logger.info("Room creation triggered on rejoin: %d room(s) formed", len(created_rooms))
+
+    db.refresh(user)
+
+    room_id: int | None = None
+    if user.state == UserState.IN_GAME:
+        participant = db.execute(
+            select(RoomParticipant).where(
+                RoomParticipant.user_id == user.id,
+                RoomParticipant.left_at.is_(None),
+            )
+        ).scalar_one_or_none()
+        if participant:
+            room_id = participant.room_id
+
+    return QueueJoinResponse(user_id=user.id, state=user.state, room_id=room_id)
+
+
 @router.get("/status", response_model=QueueStatusResponse)
 def queue_status(db: Session = Depends(get_db)) -> QueueStatusResponse:
     """Return the current number of queued users per gender."""
@@ -75,4 +106,5 @@ def queue_status(db: Session = Depends(get_db)) -> QueueStatusResponse:
         male=male_count,
         female=female_count,
     )
+
 

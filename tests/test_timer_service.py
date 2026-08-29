@@ -128,8 +128,8 @@ async def test_timer_api_endpoint(client, db):
 
 
 @pytest.mark.asyncio
-async def test_questioning_timeout_zero_answers_requeues_all(client, db):
-    """If challenger answers 0 questions, challenger and audience are re-queued and room completes."""
+async def test_questioning_timeout_zero_answers_advances_to_voting(client, db):
+    """If challenger answers 0 questions, all get '[No Response]' and room advances to VOTING."""
     room, challenger, audience = _create_sample_room(db, audience_count=2)
 
     # Start short questioning timer (0.1s)
@@ -139,16 +139,12 @@ async def test_questioning_timeout_zero_answers_requeues_all(client, db):
     await asyncio.sleep(0.2)
 
     db.refresh(room)
-    assert room.state == RoomState.COMPLETED
+    assert room.state == RoomState.VOTING
 
-    db.refresh(challenger)
-    assert challenger.state == UserState.QUEUED
-    assert challenger.queued_at is not None
-
-    for a in audience:
-        db.refresh(a)
-        assert a.state == UserState.QUEUED
-        assert a.queued_at is not None
+    answers = list(db.query(Answer).filter(Answer.room_id == room.id).all())
+    assert len(answers) == 3
+    for ans in answers:
+        assert ans.answer == "[No Response]"
 
 
 @pytest.mark.asyncio
@@ -198,9 +194,9 @@ async def test_one_on_one_question_timeout_eliminates_audience(client, db):
     db.refresh(s1)
     assert s1.state == OneOnOneSessionState.COMPLETED
 
-    # First audience user was eliminated
+    # First audience user was eliminated and in WAITING
     aud1 = db.get(User, s1.audience_id)
-    assert aud1.state == UserState.QUEUED
+    assert aud1.state == UserState.WAITING
 
     # Session 2 was activated
     s2 = db.query(OneOnOneSession).filter(OneOnOneSession.room_id == room.id, OneOnOneSession.sequence == 2).one()
