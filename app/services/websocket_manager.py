@@ -30,6 +30,8 @@ class WebSocketManager:
         self._session_connections: dict[_SessionId, dict[_UserId, WebSocket]] = defaultdict(dict)
         # { match_room_id: { user_id: WebSocket } }
         self._match_room_connections: dict[int, dict[_UserId, WebSocket]] = defaultdict(dict)
+        # { user_id: WebSocket }
+        self._queue_connections: dict[_UserId, WebSocket] = {}
 
     # -------------------------------------------------------------------------
     # Public room channels
@@ -169,6 +171,48 @@ class WebSocketManager:
                     match_room_id,
                     user_id,
                 )
+
+    # -------------------------------------------------------------------------
+    # Queue waiting room channel
+    # -------------------------------------------------------------------------
+
+    def connect_queue(self, user_id: _UserId, websocket: WebSocket) -> None:
+        """Register a new WebSocket connection for a user in the waiting queue."""
+        self._queue_connections[user_id] = websocket
+        logger.info("Queue WS connected  user=%s total_queued_sockets=%d", user_id, len(self._queue_connections))
+
+    def disconnect_queue(self, user_id: _UserId) -> None:
+        """Remove a user from the active queue WebSocket registry."""
+        if user_id in self._queue_connections:
+            del self._queue_connections[user_id]
+            logger.info("Queue WS disconnected  user=%s remaining_queued_sockets=%d", user_id, len(self._queue_connections))
+
+    def is_user_in_queue(self, user_id: _UserId) -> bool:
+        """Check if user has an active queue WebSocket connection."""
+        return user_id in self._queue_connections
+
+    def get_connected_queue_user_ids(self) -> set[_UserId]:
+        """Return set of user IDs with active queue WebSocket connections."""
+        return set(self._queue_connections.keys())
+
+    async def send_to_queue_user(self, user_id: _UserId, message: dict) -> None:
+        """Send a JSON message to a single user in the waiting queue."""
+        ws = self._queue_connections.get(user_id)
+        if ws is not None:
+            try:
+                await ws.send_json(message)
+            except Exception:
+                logger.exception("send_to_queue_user failed user=%s", user_id)
+        else:
+            logger.warning("send_to_queue_user: no connection user=%s", user_id)
+
+    async def broadcast_queue(self, message: dict) -> None:
+        """Send a JSON message to all connected users in the waiting queue."""
+        for user_id, ws in list(self._queue_connections.items()):
+            try:
+                await ws.send_json(message)
+            except Exception:
+                logger.exception("queue broadcast failed user=%s", user_id)
 
 
 # Single shared instance — import this in route handlers.

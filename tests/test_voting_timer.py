@@ -109,7 +109,7 @@ async def test_voting_timer_single_survivor_goes_to_final(client, db):
     await asyncio.sleep(0.25)
 
     db.refresh(room)
-    assert room.state == RoomState.FINAL
+    assert room.state == RoomState.ONE_ON_ONE
 
 
 @pytest.mark.asyncio

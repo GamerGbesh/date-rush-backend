@@ -10,7 +10,7 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.enums import PlayerRole, RoomState
+from app.enums import ParticipantStatus, PlayerRole, RoomState
 from app.exceptions import InvalidRoomTransitionError, RoomNotFoundError
 from app.models.room import Room
 from app.models.room_state_history import RoomStateHistory

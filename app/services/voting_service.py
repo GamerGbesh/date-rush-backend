@@ -365,10 +365,8 @@ class VotingService:
             )
 
             # Determine next phase
-            if len(survivors) > 1:
+            if len(survivors) >= 1:
                 next_state = RoomState.ONE_ON_ONE
-            elif len(survivors) == 1:
-                next_state = RoomState.FINAL
             else:
                 next_state = RoomState.COMPLETED
 

@@ -79,7 +79,7 @@ class TestVotingFlow:
             )
 
         db.refresh(room)
-        assert room.state == RoomState.FINAL
+        assert room.state == RoomState.ONE_ON_ONE
 
     @pytest.mark.asyncio
     async def test_zero_survivors_transitions_to_completed(self, client, db):

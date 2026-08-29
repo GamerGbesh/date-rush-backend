@@ -144,6 +144,7 @@ class QueueManager:
                             "Room %d created: female challenger %d, %d male audience",
                             room.id, challenger.id, len(audience),
                         )
+                        self.notify_room_assigned(room.id, [challenger.id, *(p.id for p in audience)])
                         continue
 
                     if female_count >= threshold and male_count >= 1:
@@ -157,12 +158,16 @@ class QueueManager:
                             "Room %d created: male challenger %d, %d female audience",
                             room.id, challenger.id, len(audience),
                         )
+                        self.notify_room_assigned(room.id, [challenger.id, *(p.id for p in audience)])
                         continue
                 except InsufficientQuestionsError as exc:
                     logger.warning("Room creation stopped: %s", exc)
                     break
 
                 break  # no complete room possible
+
+            if created:
+                self.broadcast_queue_status(db)
 
         return created
 
@@ -185,5 +190,50 @@ class QueueManager:
         )
         return list(result.scalars().all())
 
+    def notify_room_assigned(self, room_id: int, user_ids: list[int]) -> None:
+        """Send room_assigned event to each user's queue WebSocket."""
+        try:
+            import asyncio
+            from app.services.websocket_manager import ws_manager
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                for uid in user_ids:
+                    loop.create_task(
+                        ws_manager.send_to_queue_user(
+                            uid, {"type": "room_assigned", "room_id": room_id}
+                        )
+                    )
+        except Exception:
+            pass
+
+    def broadcast_queue_status(self, db: Session) -> None:
+        """Broadcast live queue status to all connected waiting users."""
+        try:
+            import asyncio
+            from app.models.room import Room
+            from app.enums import RoomState
+            from app.services.websocket_manager import ws_manager
+
+            active_rooms = db.execute(
+                select(func.count(Room.id)).where(Room.state != RoomState.COMPLETED)
+            ).scalar_one()
+
+            male_count = self.get_size(db, Gender.MALE)
+            female_count = self.get_size(db, Gender.FEMALE)
+
+            payload = {
+                "type": "queue_status",
+                "male": male_count,
+                "female": female_count,
+                "active_rooms": active_rooms,
+            }
+
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(ws_manager.broadcast_queue(payload))
+        except Exception:
+            pass
+
 
 queue_manager = QueueManager()
+

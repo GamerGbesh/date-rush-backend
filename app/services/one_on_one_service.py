@@ -465,8 +465,24 @@ class OneOnOneService:
                     {
                         "type": "one_on_one_started",
                         "room_id": room.id,
+                        "session_id": next_session.id,
+                        "audience_id": next_session.audience_id,
                         "sequence": next_session.sequence,
                         "total": total_sessions,
+                    },
+                )
+                await ws_manager.broadcast_session(
+                    next_session.id,
+                    {
+                        "type": "private_session_state",
+                        "session_id": next_session.id,
+                        "state": next_session.state.value if hasattr(next_session.state, "value") else str(next_session.state),
+                        "sequence": next_session.sequence,
+                        "audience_id": next_session.audience_id,
+                        "challenger_id": next_session.challenger_id,
+                        "question": next_session.question,
+                        "answer": next_session.answer,
+                        "vote": next_session.vote.value if next_session.vote else None,
                     },
                 )
             else:

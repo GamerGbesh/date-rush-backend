@@ -1,18 +1,17 @@
-"""
-WebSocket API router for live public room events and private 1-on-1 session channels.
-"""
-
+from datetime import datetime, timezone
 import logging
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.enums import RoomState
+from app.enums import Gender, RoomState, UserState
 from app.models.one_on_one_session import OneOnOneSession
 from app.models.question import Question
 from app.models.room import Room, RoomParticipant
+from app.models.user import User
+from app.services.queue_manager import queue_manager
 from app.services.websocket_manager import ws_manager
 
 logger = logging.getLogger(__name__)
@@ -309,4 +308,98 @@ async def match_room_websocket_endpoint(
             match_room_id,
             user_id,
         )
+
+
+@router.websocket("/queue/users/{user_id}")
+async def queue_websocket_endpoint(
+    websocket: WebSocket,
+    user_id: int,
+    db: Session = Depends(get_db),
+) -> None:
+    """
+    WebSocket endpoint for the waiting queue.
+    
+    1. Validates that the user exists.
+    2. Registers the connection with ws_manager.connect_queue(user_id, websocket).
+    3. Places or ensures user is in QUEUED state in DB.
+    4. Delivers current queue_status statistics immediately.
+    5. Attempts to form rooms if threshold is met.
+    6. Automatically evicts the user from the queue on disconnect (instant cleanup).
+    """
+    user = db.get(User, user_id)
+    if not user:
+        logger.warning("Queue WS rejected: user %d not found", user_id)
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    await websocket.accept()
+    ws_manager.connect_queue(user_id, websocket)
+
+    # If user is already in game, notify immediately
+    if user.state == UserState.IN_GAME:
+        participant = db.execute(
+            select(RoomParticipant).where(
+                RoomParticipant.user_id == user.id,
+                RoomParticipant.left_at.is_(None),
+            )
+        ).scalar_one_or_none()
+        if participant:
+            await websocket.send_json(
+                {"type": "room_assigned", "room_id": participant.room_id}
+            )
+    elif user.state not in (UserState.MATCHED, UserState.COMPLETED):
+        # Ensure user is queued in DB
+        if user.state != UserState.QUEUED:
+            user.state = UserState.QUEUED
+            user.queued_at = datetime.now(timezone.utc)
+            db.commit()
+            db.refresh(user)
+
+    # Deliver immediate queue statistics
+    active_rooms = db.execute(
+        select(func.count(Room.id)).where(Room.state != RoomState.COMPLETED)
+    ).scalar_one()
+
+    male_count = queue_manager.get_size(db, Gender.MALE)
+    female_count = queue_manager.get_size(db, Gender.FEMALE)
+
+    await websocket.send_json(
+        {
+            "type": "queue_status",
+            "male": male_count,
+            "female": female_count,
+            "active_rooms": active_rooms,
+        }
+    )
+
+    # Broadcast updated queue status to everyone in the waiting room
+    queue_manager.broadcast_queue_status(db)
+
+    # Check if rooms can now be formed
+    queue_manager.try_create_rooms(db)
+
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        ws_manager.disconnect_queue(user_id)
+        logger.info("Queue WS disconnected cleanly for user %d", user_id)
+        # Re-fetch user to check if they were assigned to a room before disconnecting
+        db.refresh(user)
+        if user.state == UserState.QUEUED:
+            user.state = UserState.WAITING
+            user.queued_at = None
+            db.commit()
+            logger.info("User %d returned to WAITING on queue disconnect", user_id)
+            queue_manager.broadcast_queue_status(db)
+    except Exception:
+        ws_manager.disconnect_queue(user_id)
+        logger.exception("Queue WS exception for user %d", user_id)
+        db.refresh(user)
+        if user.state == UserState.QUEUED:
+            user.state = UserState.WAITING
+            user.queued_at = None
+            db.commit()
+            queue_manager.broadcast_queue_status(db)
+
 
