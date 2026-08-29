@@ -25,7 +25,7 @@ from app.exceptions import (
     SessionUnauthorizedError,
 )
 from app.models.user import User
-from app.schemas.answer import AnswerRead, AnswerSubmitRequest
+from app.schemas.answer import AnswerRead, AnswerSubmitRequest, RoomAnswerItem
 from app.schemas.match import (
     FinalSelectionRequest,
     FinalSelectionStatusResponse,
@@ -96,6 +96,54 @@ def get_room_timer(room_id: int, db: Session = Depends(get_db)) -> TimerStatusRe
     room = room_manager.get_room(db, room_id)
     timer_info = timer_service.get_timer_info(room.id)
     return TimerStatusResponse(**timer_info)
+
+
+@router.get("/{room_id}/answers", response_model=list[RoomAnswerItem])
+def get_room_answers(room_id: int, db: Session = Depends(get_db)) -> list[RoomAnswerItem]:
+    """Retrieve all 3 public questions and their corresponding answers (or '[No Response]')."""
+    from sqlalchemy import select
+    from app.models.room_question import RoomQuestion
+    from app.models.answer import Answer
+    from app.enums import QuestionPhase, RoomState
+
+    room = room_manager.get_room(db, room_id)
+
+    # Query all public questions assigned to this room
+    room_questions = list(
+        db.execute(
+            select(RoomQuestion)
+            .where(
+                RoomQuestion.room_id == room.id,
+                RoomQuestion.phase == QuestionPhase.PUBLIC,
+            )
+            .order_by(RoomQuestion.position.asc())
+        ).scalars().all()
+    )
+
+    # Query all answers for this room
+    answers = {
+        a.question_id: a.answer
+        for a in db.execute(
+            select(Answer).where(Answer.room_id == room.id)
+        ).scalars().all()
+    }
+
+    result = []
+    for rq in room_questions:
+        q_text = rq.question.text if rq.question else f"Question {rq.position}"
+        ans = answers.get(rq.question_id)
+        if ans is None or not ans.strip():
+            ans = "[No Response]"
+        result.append(
+            RoomAnswerItem(
+                round=rq.position,
+                question=q_text,
+                question_id=rq.question_id,
+                answer=ans,
+            )
+        )
+
+    return result
 
 
 @router.post("/{room_id}/answers", response_model=AnswerRead, status_code=status.HTTP_201_CREATED)

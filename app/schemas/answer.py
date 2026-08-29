@@ -17,3 +17,11 @@ class AnswerRead(BaseModel):
     user_id: int
     answer: str
     created_at: datetime
+
+
+class RoomAnswerItem(BaseModel):
+    round: int
+    question: str
+    question_id: int | None = None
+    answer: str
+
