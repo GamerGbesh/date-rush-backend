@@ -31,8 +31,8 @@ class Settings(BaseSettings):
 
     # Duration (in seconds) for each game phase timer (can be overridden via env vars)
     QUESTIONING_TIMEOUT_SECONDS: int = (
-        2 * 60
-    )  # 2 minutes for challenger to answer public questions
+        60  # 1 minute for challenger to answer public questions
+    )
     VOTING_TIMEOUT_SECONDS: int = 30  # 30 seconds for public voting
     ONE_ON_ONE_QUESTION_TIMEOUT_SECONDS: int = (
         60  # 1 minute for audience to ask private question
