@@ -210,6 +210,14 @@ class MatchService:
 
             db.commit()
             db.refresh(match)
+            logger.info(
+                "Match %d created for room %d (challenger=%d, candidate=%d, eliminated_count=%d)",
+                match.id,
+                room.id,
+                room.challenger_id,
+                candidate_id,
+                len(eliminated_users),
+            )
 
             # Create private MatchRoom for contact exchange
             from app.services.match_room_service import match_room_service
@@ -310,6 +318,13 @@ class MatchService:
 
             db.commit()
             db.refresh(match)
+            logger.info(
+                "Single-survivor Match %d created for room %d (challenger=%d, survivor=%d)",
+                match.id,
+                room.id,
+                room.challenger_id,
+                survivor_id,
+            )
 
             from app.services.match_room_service import match_room_service
             match_room = match_room_service.create_match_room(db, match.id)

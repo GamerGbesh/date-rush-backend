@@ -20,7 +20,7 @@ class TestConnect:
     def test_connect_stores_websocket(self, wm):
         ws = _mock_ws()
         wm.connect(room_id=1, user_id=10, websocket=ws)
-        assert wm._connections[1][10] is ws
+        assert ws in wm._connections[1][10]
 
     def test_multiple_users_same_room(self, wm):
         ws1, ws2 = _mock_ws(), _mock_ws()
@@ -28,19 +28,33 @@ class TestConnect:
         wm.connect(1, 20, ws2)
         assert len(wm._connections[1]) == 2
 
+    def test_multiple_sockets_same_user(self, wm):
+        ws1, ws2 = _mock_ws(), _mock_ws()
+        wm.connect(1, 10, ws1)
+        wm.connect(1, 10, ws2)
+        assert len(wm._connections[1][10]) == 2
+
 
 class TestDisconnect:
     def test_disconnect_removes_websocket(self, wm):
         ws = _mock_ws()
         wm.connect(1, 10, ws)
-        wm.disconnect(1, 10)
+        wm.disconnect(1, 10, ws)
         assert 10 not in wm._connections.get(1, {})
 
     def test_disconnect_cleans_empty_room(self, wm):
         ws = _mock_ws()
         wm.connect(1, 10, ws)
-        wm.disconnect(1, 10)
+        wm.disconnect(1, 10, ws)
         assert 1 not in wm._connections
+
+    def test_disconnect_specific_socket_retains_others(self, wm):
+        ws1, ws2 = _mock_ws(), _mock_ws()
+        wm.connect(1, 10, ws1)
+        wm.connect(1, 10, ws2)
+        wm.disconnect(1, 10, ws1)
+        assert ws1 not in wm._connections[1][10]
+        assert ws2 in wm._connections[1][10]
 
     def test_disconnect_nonexistent_is_safe(self, wm):
         # Should not raise
@@ -56,9 +70,32 @@ class TestSendToUser:
         ws.send_json.assert_awaited_once_with({"event": "test"})
 
     @pytest.mark.asyncio
+    async def test_sends_to_all_sockets_for_user(self, wm):
+        ws1, ws2 = _mock_ws(), _mock_ws()
+        wm.connect(1, 10, ws1)
+        wm.connect(1, 10, ws2)
+        await wm.send_to_user(1, 10, {"event": "multi"})
+        ws1.send_json.assert_awaited_once_with({"event": "multi"})
+        ws2.send_json.assert_awaited_once_with({"event": "multi"})
+
+    @pytest.mark.asyncio
     async def test_no_error_if_user_not_connected(self, wm):
         # Should log a warning but not raise
         await wm.send_to_user(1, 99, {"event": "test"})
+
+
+class TestSendToUsers:
+    @pytest.mark.asyncio
+    async def test_sends_message_only_to_specified_users(self, wm):
+        ws1, ws2, ws3 = _mock_ws(), _mock_ws(), _mock_ws()
+        wm.connect(1, 10, ws1)
+        wm.connect(1, 20, ws2)
+        wm.connect(1, 30, ws3)
+
+        await wm.send_to_users(1, [10, 20], {"event": "private"})
+        ws1.send_json.assert_awaited_once_with({"event": "private"})
+        ws2.send_json.assert_awaited_once_with({"event": "private"})
+        ws3.send_json.assert_not_called()
 
 
 class TestBroadcast:

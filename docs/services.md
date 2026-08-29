@@ -324,7 +324,13 @@ Removes the connection. If the room becomes empty after disconnect, the room's d
 
 #### `send_to_user(room_id, user_id, message) → None` (async)
 
-Sends a JSON-serialisable message to a specific user in a room. No-op if the user is not connected (e.g., reconnecting).
+Sends a JSON-serialisable message to a specific user in a room across their active socket connections. No-op if the user is not connected.
+
+---
+
+#### `send_to_users(room_id, user_ids, message) → None` (async)
+
+Sends a JSON-serialisable message strictly to a specified set/iterable of users in a room. Used for private one-on-one message routing inside the GameRoom channel.
 
 ---
 

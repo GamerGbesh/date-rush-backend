@@ -159,34 +159,34 @@ async def test_live_websockets():
             s1_id = active_s["id"]
             s1_aud = active_s["audience_id"]
 
-            # --- Test 2: Private 1-on-1 WebSocket ---
-            log("WS-TEST 2", f"Testing Private 1-on-1 Channel for Session #{s1_id} (Audience #{s1_aud})...")
-            uri_ooo_aud = f"{BASE_WS}/ws/rooms/{room_id}/one-on-one/{s1_id}/users/{s1_aud}"
-            uri_ooo_chal = f"{BASE_WS}/ws/rooms/{room_id}/one-on-one/{s1_id}/users/{f_id}"
+            # --- Test 2: Filtered GameRoom 1-on-1 Messages ---
+            log("WS-TEST 2", f"Testing Filtered 1-on-1 Channel for Session #{s1_id} (Audience #{s1_aud})...")
+            # Consume one_on_one_started / one_on_one_progress on existing GameRoom sockets
+            start_f = json.loads(await ws_f.recv())
+            success(f"Challenger received one_on_one_started on GameRoom WS: session={start_f.get('session_id')}")
+            _ = json.loads(await ws_f.recv())  # one_on_one_progress
+            start_m = json.loads(await ws_m.recv())
+            _ = json.loads(await ws_m.recv())  # one_on_one_progress
 
-            async with websockets.connect(uri_ooo_aud) as ws_ooo_aud, websockets.connect(uri_ooo_chal) as ws_ooo_chal:
-                # Initial private state
-                state_a = json.loads(await ws_ooo_aud.recv())
-                state_c = json.loads(await ws_ooo_chal.recv())
-                success(f"Private session initial state received: {state_a['type']} (state='{state_a['state']}')")
+            # Audience submits private question
+            await client.post(f"/rooms/{room_id}/one-on-one/{s1_id}/question", json={"user_id": s1_aud, "text": "What inspires you?"})
+            q_ev_c = json.loads(await ws_f.recv())
+            success(f"Challenger received private question via GameRoom WebSocket: '{q_ev_c.get('question') or q_ev_c.get('text')}'")
+            _ = json.loads(await ws_m.recv())
 
-                # Audience submits private question
-                await client.post(f"/rooms/{room_id}/one-on-one/{s1_id}/question", json={"user_id": s1_aud, "text": "What inspires you?"})
-                q_ev_c = json.loads(await ws_ooo_chal.recv())
-                success(f"Challenger received private question via WebSocket: '{q_ev_c['text']}'")
-                _ = await ws_ooo_aud.recv()
+            # Challenger submits private answer
+            await client.post(f"/rooms/{room_id}/one-on-one/{s1_id}/answer", json={"user_id": f_id, "text": "Passionate and creative people."})
+            a_ev_a = json.loads(await ws_m.recv())
+            success(f"Audience received private answer via GameRoom WebSocket: '{a_ev_a.get('answer') or a_ev_a.get('text')}'")
+            _ = json.loads(await ws_f.recv())
 
-                # Challenger submits private answer
-                await client.post(f"/rooms/{room_id}/one-on-one/{s1_id}/answer", json={"user_id": f_id, "text": "Passionate and creative people."})
-                a_ev_a = json.loads(await ws_ooo_aud.recv())
-                success(f"Audience received private answer via WebSocket: '{a_ev_a['text']}'")
-                _ = await ws_ooo_chal.recv()
-
-                # Audience votes YES
-                await client.post(f"/rooms/{room_id}/one-on-one/{s1_id}/vote", json={"user_id": s1_aud, "vote": "yes"})
-                comp_a = json.loads(await ws_ooo_aud.recv())
-                comp_c = json.loads(await ws_ooo_chal.recv())
-                success(f"Session completed event delivered privately to both: {comp_a['type']}")
+            # Audience votes YES
+            await client.post(f"/rooms/{room_id}/one-on-one/{s1_id}/vote", json={"user_id": s1_aud, "vote": "yes"})
+            comp_c = json.loads(await ws_f.recv())
+            comp_a = json.loads(await ws_m.recv())
+            success(f"Session completed event delivered privately to both via GameRoom WS: {comp_a['type']}")
+            _ = json.loads(await ws_f.recv())  # one_on_one_progress
+            _ = json.loads(await ws_m.recv())  # one_on_one_progress
 
             # Complete remaining sessions
             while True:

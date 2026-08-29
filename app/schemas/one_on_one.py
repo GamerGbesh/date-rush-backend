@@ -48,9 +48,6 @@ class OneOnOneSessionPublicSummary(BaseModel):
     challenger_id: int | None = None
     sequence: int
     state: OneOnOneSessionState
-    question: str | None = None
-    answer: str | None = None
-    vote: VoteChoice | None = None
 
 
 class OneOnOneRoomStatusResponse(BaseModel):

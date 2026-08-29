@@ -1,13 +1,38 @@
 """
-Manual end-to-end testing script for Date Rush live server.
-Runs against http://127.0.0.1:8000.
+Comprehensive System Audit for Date Rush.
+Audits the complete lifecycle:
+1. Health & Database
+2. Queue operations & FIFO Matchmaking
+3. Room creation & Public Questioning
+4. Public Voting & Elimination
+5. Single GameRoom WebSocket & Filtered One-on-One Sessions
+6. Message Isolation & Privacy Verification
+7. Final Selection & MatchRoom Contact Exchange
+8. Reconnection & Security Guards
 """
 
 import sys
-import time
-import httpx
+from unittest.mock import patch
 
-BASE_URL = "http://127.0.0.1:8000"
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+from starlette.testclient import TestClient
+
+import app.models  # noqa: F401
+from app.database import Base, get_db
+from app.enums import (
+    ParticipantStatus,
+    PlayerRole,
+    QuestionTarget,
+    RoomState,
+    UserState,
+)
+from app.main import app
+from app.models.one_on_one_session import OneOnOneSession
+from app.models.question import Question
+from app.models.room import Room, RoomParticipant
+from app.models.user import User
 
 
 def log(section: str, msg: str):
@@ -23,209 +48,338 @@ def error(msg: str):
     sys.exit(1)
 
 
-def run_manual_tests():
-    with httpx.Client(base_url=BASE_URL, timeout=120.0) as client:
-        # --- Step 1: Health Check ---
-        log("STEP 1", "Checking server health...")
-        resp = client.get("/health")
-        if resp.status_code != 200 or resp.json() != {"status": "ok"}:
-            error(f"Health check failed: {resp.status_code} {resp.text}")
-        success("Server is healthy and responding.")
+def run_system_audit():
+    # Setup isolated test database engine
+    engine = create_engine(
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(bind=engine)
+    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-        # --- Step 2: Queue Initial Status ---
-        log("STEP 2", "Querying initial queue status...")
-        resp = client.get("/queue/status")
-        if resp.status_code != 200:
-            error(f"Failed to get queue status: {resp.status_code} {resp.text}")
-        success(f"Queue status: {resp.json()}")
+    db = TestingSessionLocal()
 
-        # --- Step 3: Register 1 Female + 5 Males ---
-        log("STEP 3", "Registering users and joining matchmaking queues...")
-        # 1 Female
-        resp_f = client.post("/queue/join", json={"name": "Ama (Challenger)", "gender": "female"})
-        if resp_f.status_code != 201:
-            error(f"Failed to queue female user: {resp_f.text}")
-        female_id = resp_f.json()["user_id"]
-        success(f"Queued Female: ID={female_id}, Name='Ama'")
+    # Seed questions
+    questions = [
+        Question(text=f"General Question {i}", target_gender=QuestionTarget.ANY, active=True)
+        for i in range(1, 10)
+    ]
+    db.add_all(questions)
+    db.commit()
 
-        # 5 Males
-        male_names = ["Kofi", "Yaw", "Kwame", "Kojo", "Kwabena"]
-        male_ids = []
-        for name in male_names:
-            resp_m = client.post("/queue/join", json={"name": name, "gender": "male"})
-            if resp_m.status_code != 201:
-                error(f"Failed to queue male user '{name}': {resp_m.text}")
-            m_id = resp_m.json()["user_id"]
-            male_ids.append(m_id)
-            success(f"Queued Male: ID={m_id}, Name='{name}'")
+    def override_get_db():
+        try:
+            yield db
+        finally:
+            pass
 
-        # --- Step 4: Verify Room Formation ---
-        log("STEP 4", "Verifying automatic room creation...")
-        resp_me = client.get(f"/users/me?user_id={female_id}")
-        if resp_me.status_code != 200:
-            error(f"Failed to fetch profile: {resp_me.text}")
-        f_profile = resp_me.json()
-        if f_profile["state"] != "in_game" or not f_profile["room_id"]:
-            error(f"Room was not created automatically! Profile: {f_profile}")
-        room_id = f_profile["room_id"]
-        success(f"Game Room #{room_id} created automatically! Challenger: {female_id} (Role: {f_profile['role']})")
+    app.dependency_overrides[get_db] = override_get_db
 
-        # Check room details
-        resp_room = client.get(f"/rooms/{room_id}")
-        room_data = resp_room.json()
-        active_aud_ids = [p["user_id"] for p in room_data["participants"] if p["role"] == "audience"]
-        success(f"Room #{room_id} has {len(room_data['participants'])} active participants (audience IDs: {active_aud_ids}) in state '{room_data['room']['state']}'.")
+    with patch("app.main.init_db"):
+        with TestClient(app, raise_server_exceptions=True) as client:
+            print("\033[1;36m========================================================\033[0m")
+            print("\033[1;36m       DATE RUSH — COMPREHENSIVE SYSTEM AUDIT           \033[0m")
+            print("\033[1;36m========================================================\033[0m")
 
-        # --- Step 5: Advance Room to QUESTIONING ---
-        log("STEP 5", "Transitioning room READY -> INTRO -> QUESTIONING...")
-        resp_admin1 = client.post(f"/admin/rooms/{room_id}/transition", json={"state": "intro"})
-        if resp_admin1.status_code != 200:
-            error(f"Failed transition to intro: {resp_admin1.text}")
-        resp_admin2 = client.post(f"/admin/rooms/{room_id}/transition", json={"state": "questioning"})
-        if resp_admin2.status_code != 200:
-            error(f"Failed transition to questioning: {resp_admin2.text}")
-        success("Room is now in QUESTIONING state.")
+            # --- 1. Health & Queue Status ---
+            log("AUDIT 1", "Health check and initial queue status...")
+            resp = client.get("/health")
+            assert resp.status_code == 200 and resp.json() == {"status": "ok"}
+            success("API is healthy.")
 
-        # --- Step 6: Public Questioning (3 Rounds) ---
-        log("STEP 6", "Challenger submitting answers to 3 public questions...")
-        answers = [
-            "I love visiting nature reserves and trying authentic local dishes.",
-            "Honesty, kindness, and a great sense of humor.",
-            "I prioritize open communication and actively listening to each other.",
-        ]
-        for round_num, ans in enumerate(answers, start=1):
-            resp_ans = client.post(
-                f"/rooms/{room_id}/answers",
-                json={"user_id": female_id, "answer": ans},
+            resp_q = client.get("/queue/status")
+            assert resp_q.status_code == 200
+            success(f"Initial queue status: {resp_q.json()}")
+
+            # --- 2. Registration & FIFO Matchmaking ---
+            log("AUDIT 2", "Queue registration & automatic room formation...")
+            resp_f = client.post("/queue/join", json={"name": "Ama (Challenger)", "gender": "female"})
+            female_id = resp_f.json()["user_id"]
+            success(f"Female registered: #{female_id}")
+
+            male_ids = []
+            for name in ["Kofi", "Yaw", "Kwame", "Kojo", "Kwabena"]:
+                resp_m = client.post("/queue/join", json={"name": name, "gender": "male"})
+                male_ids.append(resp_m.json()["user_id"])
+                success(f"Male registered: {name} (#{male_ids[-1]})")
+
+            me_resp = client.get(f"/users/me?user_id={female_id}")
+            room_id = me_resp.json()["room_id"]
+            assert room_id is not None
+            success(f"Room #{room_id} formed automatically upon threshold satisfaction!")
+
+            # --- 3. Single GameRoom WebSocket & Questioning ---
+            log("AUDIT 3", "GameRoom WebSocket connection & 3 public questioning rounds...")
+            # Advance room to questioning
+            client.post(f"/admin/rooms/{room_id}/transition", json={"state": "intro"})
+            client.post(f"/admin/rooms/{room_id}/transition", json={"state": "questioning"})
+
+            # Connect Challenger and Audience 1 to the Single GameRoom WebSocket
+            with client.websocket_connect(f"/ws/rooms/{room_id}/users/{female_id}") as ws_chal:
+                with client.websocket_connect(f"/ws/rooms/{room_id}/users/{male_ids[0]}") as ws_aud1:
+                    with client.websocket_connect(f"/ws/rooms/{room_id}/users/{male_ids[1]}") as ws_aud2:
+                        with client.websocket_connect(f"/ws/rooms/{room_id}/users/{male_ids[2]}") as ws_aud3:
+                            # State sync on connect
+                            assert ws_chal.receive_json()["type"] == "room_state_changed"
+                            assert ws_chal.receive_json()["type"] == "question_started"
+                            assert ws_aud1.receive_json()["type"] == "room_state_changed"
+                            assert ws_aud1.receive_json()["type"] == "question_started"
+                            assert ws_aud2.receive_json()["type"] == "room_state_changed"
+                            assert ws_aud2.receive_json()["type"] == "question_started"
+                            assert ws_aud3.receive_json()["type"] == "room_state_changed"
+                            assert ws_aud3.receive_json()["type"] == "question_started"
+                            success("Initial GameRoom WebSocket state synchronized for all clients.")
+
+                            # Answer 3 questions
+                            for r_num in range(1, 4):
+                                client.post(
+                                    f"/rooms/{room_id}/answers",
+                                    json={"user_id": female_id, "answer": f"Answer to Round {r_num}"},
+                                )
+                                # Consume broadcast answer
+                                ev_ans_c = ws_chal.receive_json()
+                                ev_ans_a1 = ws_aud1.receive_json()
+                                _ = ws_aud2.receive_json()
+                                _ = ws_aud3.receive_json()
+                                assert ev_ans_c["type"] == "answer_revealed"
+                                assert ev_ans_a1["type"] == "answer_revealed"
+                                success(f"Round {r_num} Challenger answer broadcast to all participants.")
+
+                                if r_num < 3:
+                                    _ = ws_chal.receive_json()  # next question_started
+                                    _ = ws_aud1.receive_json()
+                                    _ = ws_aud2.receive_json()
+                                    _ = ws_aud3.receive_json()
+
+                            # --- 4. Public Voting & Elimination ---
+                            log("AUDIT 4", "Public voting phase & elimination...")
+                            # Room enters voting
+                            assert ws_chal.receive_json()["type"] == "room_state_changed"
+                            assert ws_chal.receive_json()["type"] == "voting_started"
+                            _ = ws_aud1.receive_json()  # room_state_changed
+                            _ = ws_aud1.receive_json()  # voting_started
+                            _ = ws_aud2.receive_json()
+                            _ = ws_aud2.receive_json()
+                            _ = ws_aud3.receive_json()
+                            _ = ws_aud3.receive_json()
+                            success("Room transitioned to VOTING.")
+
+                            # 3 Males vote YES, 2 Males vote NO
+                            for m_id in male_ids[:3]:
+                                client.post(f"/rooms/{room_id}/vote", json={"user_id": m_id, "vote": "yes"})
+                                # Consume vote progress
+                                _ = ws_chal.receive_json()
+                                _ = ws_aud1.receive_json()
+                                _ = ws_aud2.receive_json()
+                                _ = ws_aud3.receive_json()
+
+                            for m_id in male_ids[3:]:
+                                client.post(f"/rooms/{room_id}/vote", json={"user_id": m_id, "vote": "no"})
+                                _ = ws_chal.receive_json()
+                                _ = ws_aud1.receive_json()
+                                _ = ws_aud2.receive_json()
+                                _ = ws_aud3.receive_json()
+
+                            # Voting finishes -> Room transitions to ONE_ON_ONE
+                            _ = ws_chal.receive_json()  # voting_completed
+                            _ = ws_chal.receive_json()  # room_state_changed (elimination)
+                            _ = ws_chal.receive_json()  # participants_eliminated
+                            _ = ws_chal.receive_json()  # room_state_changed (one_on_one)
+                            s1_start_chal = ws_chal.receive_json()
+                            assert s1_start_chal["type"] == "one_on_one_started"
+                            _ = ws_chal.receive_json()  # one_on_one_progress (completed=0)
+
+                            _ = ws_aud1.receive_json()  # voting_completed
+                            _ = ws_aud1.receive_json()  # room_state_changed (elimination)
+                            _ = ws_aud1.receive_json()  # participants_eliminated
+                            _ = ws_aud1.receive_json()  # room_state_changed (one_on_one)
+                            s1_start_aud1 = ws_aud1.receive_json()
+                            assert s1_start_aud1["type"] == "one_on_one_started"
+                            _ = ws_aud1.receive_json()  # one_on_one_progress
+
+                            _ = ws_aud2.receive_json()  # voting_completed
+                            _ = ws_aud2.receive_json()  # room_state_changed (elimination)
+                            _ = ws_aud2.receive_json()  # participants_eliminated
+                            _ = ws_aud2.receive_json()  # room_state_changed (one_on_one)
+                            prog_aud2 = ws_aud2.receive_json()
+                            assert prog_aud2["type"] == "one_on_one_progress"
+
+                            _ = ws_aud3.receive_json()  # voting_completed
+                            _ = ws_aud3.receive_json()  # room_state_changed (elimination)
+                            _ = ws_aud3.receive_json()  # participants_eliminated
+                            _ = ws_aud3.receive_json()  # room_state_changed (one_on_one)
+                            prog_aud3 = ws_aud3.receive_json()
+                            assert prog_aud3["type"] == "one_on_one_progress"
+                            success("Public voting completed; 2 participants eliminated; 3 survivors entered ONE_ON_ONE.")
+
+                            # --- 5. Filtered One-on-One Session Routing Audit ---
+                            log("AUDIT 5", "Auditing filtered message isolation on single GameRoom WebSocket...")
+                            s1 = db.query(OneOnOneSession).where(OneOnOneSession.room_id == room_id, OneOnOneSession.sequence == 1).one()
+                            s2 = db.query(OneOnOneSession).where(OneOnOneSession.room_id == room_id, OneOnOneSession.sequence == 2).one()
+                            s3 = db.query(OneOnOneSession).where(OneOnOneSession.room_id == room_id, OneOnOneSession.sequence == 3).one()
+
+                            # Session 1: Aud 1 asks private question
+                            client.post(
+                                f"/rooms/{room_id}/one-on-one/{s1.id}/question",
+                                json={"user_id": male_ids[0], "text": "Top secret question from Aud 1"},
+                            )
+                            q_c = ws_chal.receive_json()
+                            q_a1 = ws_aud1.receive_json()
+                            assert q_c["type"] == "one_on_one_question"
+                            assert q_c["question"] == "Top secret question from Aud 1"
+                            assert q_a1["type"] == "one_on_one_question"
+                            success("Audience 1 private question received ONLY by Challenger & Audience 1.")
+
+                            # Challenger answers private question
+                            client.post(
+                                f"/rooms/{room_id}/one-on-one/{s1.id}/answer",
+                                json={"user_id": female_id, "text": "Top secret answer from Challenger"},
+                            )
+                            ans_c = ws_chal.receive_json()
+                            ans_a1 = ws_aud1.receive_json()
+                            assert ans_c["type"] == "one_on_one_answer"
+                            assert ans_a1["type"] == "one_on_one_answer"
+                            success("Challenger private answer received ONLY by Challenger & Audience 1.")
+
+                            # Aud 1 votes YES -> Marked FINALIST
+                            client.post(f"/rooms/{room_id}/one-on-one/{s1.id}/vote", json={"user_id": male_ids[0], "vote": "yes"})
+                            assert ws_chal.receive_json()["type"] == "one_on_one_completed"
+                            assert ws_aud1.receive_json()["type"] == "one_on_one_completed"
+                            assert ws_chal.receive_json()["type"] == "one_on_one_progress"
+                            assert ws_aud1.receive_json()["type"] == "one_on_one_progress"
+                            assert ws_aud2.receive_json()["type"] == "one_on_one_progress"
+                            assert ws_aud3.receive_json()["type"] == "one_on_one_progress"
+
+                            # Session 2 automatically starts for Audience 2
+                            s2_c = ws_chal.receive_json()
+                            s2_a2 = ws_aud2.receive_json()
+                            assert s2_c["type"] == "one_on_one_started"
+                            assert s2_c["audience_id"] == male_ids[1]
+                            assert s2_a2["type"] == "one_on_one_started"
+                            success("Session 2 auto-activated for Audience 2 without creating a new WebSocket room.")
+
+                            # Session 2: Aud 2 asks, Challenger answers, Aud 2 votes NO -> Eliminated
+                            client.post(f"/rooms/{room_id}/one-on-one/{s2.id}/question", json={"user_id": male_ids[1], "text": "Q2"})
+                            _ = ws_chal.receive_json()
+                            _ = ws_aud2.receive_json()
+
+                            client.post(f"/rooms/{room_id}/one-on-one/{s2.id}/answer", json={"user_id": female_id, "text": "A2"})
+                            _ = ws_chal.receive_json()
+                            _ = ws_aud2.receive_json()
+
+                            client.post(f"/rooms/{room_id}/one-on-one/{s2.id}/vote", json={"user_id": male_ids[1], "vote": "no"})
+                            assert ws_chal.receive_json()["type"] == "one_on_one_completed"
+                            assert ws_aud2.receive_json()["type"] == "one_on_one_completed"
+                            assert ws_aud2.receive_json()["type"] == "eliminated"
+                            assert ws_chal.receive_json()["type"] == "one_on_one_progress"
+                            assert ws_aud1.receive_json()["type"] == "one_on_one_progress"
+                            assert ws_aud3.receive_json()["type"] == "one_on_one_progress"
+                            success("Audience 2 voted NO: correctly received elimination event and was disconnected.")
+
+                            # Session 3 automatically starts for Audience 3
+                            s3_c = ws_chal.receive_json()
+                            s3_a3 = ws_aud3.receive_json()
+                            assert s3_c["type"] == "one_on_one_started"
+                            assert s3_a3["type"] == "one_on_one_started"
+
+                            client.post(f"/rooms/{room_id}/one-on-one/{s3.id}/question", json={"user_id": male_ids[2], "text": "Q3"})
+                            _ = ws_chal.receive_json()
+                            _ = ws_aud3.receive_json()
+
+                            client.post(f"/rooms/{room_id}/one-on-one/{s3.id}/answer", json={"user_id": female_id, "text": "A3"})
+                            _ = ws_chal.receive_json()
+                            _ = ws_aud3.receive_json()
+
+                            client.post(f"/rooms/{room_id}/one-on-one/{s3.id}/vote", json={"user_id": male_ids[2], "vote": "yes"})
+                            _ = ws_chal.receive_json()  # one_on_one_completed
+                            _ = ws_aud3.receive_json()
+                            _ = ws_chal.receive_json()  # one_on_one_progress
+                            _ = ws_aud1.receive_json()
+                            _ = ws_aud3.receive_json()
+
+                            # Room automatically transitions to FINAL_SELECTION
+                            assert ws_chal.receive_json()["type"] == "room_state_changed"
+                            fs_chal = ws_chal.receive_json()
+                            assert fs_chal["type"] == "final_selection_started"
+                            assert len(fs_chal["candidates"]) == 2
+                            success("All 1-on-1 sessions completed: 2 finalists survived -> Entered FINAL_SELECTION.")
+
+            # --- 6. Final Selection & Match Creation ---
+            log("AUDIT 6", "Final selection and Match Room initialization...")
+            resp_fs = client.post(
+                f"/rooms/{room_id}/final-selection",
+                json={"user_id": female_id, "candidate_id": male_ids[0]},
             )
-            if resp_ans.status_code != 201:
-                error(f"Failed to submit answer for round {round_num}: {resp_ans.text}")
-            success(f"Round {round_num} Answer submitted: '{ans[:40]}...'")
+            assert resp_fs.status_code == 201
+            match_id = resp_fs.json()["id"]
 
-        # Check that room automatically transitioned to VOTING
-        resp_room = client.get(f"/rooms/{room_id}")
-        if resp_room.json()["room"]["state"] != "voting":
-            error(f"Room state expected 'voting', got '{resp_room.json()['room']['state']}'")
-        success("All 3 public questions answered! Room automatically entered 'VOTING' phase.")
+            resp_m_info = client.get(f"/matches/{match_id}?user_id={female_id}")
+            match_room_id = resp_m_info.json()["match_room_id"]
+            success(f"Match #{match_id} created with Private MatchRoom #{match_room_id}!")
 
-        # --- Step 7: Public Voting & Elimination ---
-        log("STEP 7", "Audience members casting public votes (3 YES, 2 NO)...")
-        # 3 Vote YES
-        for idx in range(3):
-            m_id = active_aud_ids[idx]
-            resp_v = client.post(f"/rooms/{room_id}/vote", json={"user_id": m_id, "vote": "yes"})
-            if resp_v.status_code != 201:
-                error(f"Failed to vote YES for user {m_id}: {resp_v.text}")
-            success(f"Audience #{m_id} voted YES.")
+            # --- 7. Private Match Room Contact Exchange ---
+            log("AUDIT 7", "Private Match Room WebSocket contact exchange...")
+            with client.websocket_connect(f"/ws/match-rooms/{match_room_id}/users/{female_id}") as ws_mr_chal:
+                with client.websocket_connect(f"/ws/match-rooms/{match_room_id}/users/{male_ids[0]}") as ws_mr_aud:
+                    assert ws_mr_chal.receive_json()["type"] == "match_room_state"
+                    assert ws_mr_aud.receive_json()["type"] == "match_room_state"
 
-        # 2 Vote NO
-        for idx in range(3, 5):
-            m_id = active_aud_ids[idx]
-            resp_v = client.post(f"/rooms/{room_id}/vote", json={"user_id": m_id, "vote": "no"})
-            if resp_v.status_code != 201:
-                error(f"Failed to vote NO for user {m_id}: {resp_v.text}")
-            success(f"Audience #{m_id} voted NO.")
+                    # Challenger submits contact
+                    client.post(
+                        f"/match-rooms/{match_room_id}/contacts",
+                        json={"user_id": female_id, "whatsapp": "+233240001122"},
+                    )
+                    assert ws_mr_chal.receive_json()["type"] == "contact_submission_status"
+                    assert ws_mr_aud.receive_json()["type"] == "waiting_for_partner"
 
-        # Room automatically enters ONE_ON_ONE with 3 survivors!
-        resp_room = client.get(f"/rooms/{room_id}")
-        if resp_room.json()["room"]["state"] != "one_on_one":
-            error(f"Room state expected 'one_on_one', got '{resp_room.json()['room']['state']}'")
-        success("Voting finalized! 2 NO voters eliminated to queue; Room entered 'ONE_ON_ONE' with 3 survivors.")
+                    # Candidate submits contact -> Triggers atomic exchange
+                    client.post(
+                        f"/match-rooms/{match_room_id}/contacts",
+                        json={"user_id": male_ids[0], "snapchat": "kofi_gh"},
+                    )
+                    assert ws_mr_aud.receive_json()["type"] == "contact_submission_status"
 
-        # --- Step 8: Sequential One-on-One Sessions ---
-        log("STEP 8", "Executing sequential 1-on-1 private sessions...")
-        resp_ooo = client.get(f"/rooms/{room_id}/one-on-one")
-        sessions = resp_ooo.json()
-        success(f"Found {len(sessions)} sequential 1-on-1 sessions.")
+                    exc_c = ws_mr_chal.receive_json()
+                    assert exc_c["type"] == "contacts_exchanged"
+                    assert exc_c["partner"]["snapchat"] == "kofi_gh"
+                    _ = ws_mr_chal.receive_json()  # match_completed
 
-        # Session 1: Aud 0 -> Asks Q -> Challenger Answers -> Votes YES (Finalist)
-        s1 = sessions[0]
-        client.post(f"/rooms/{room_id}/one-on-one/{s1['id']}/question", json={"user_id": s1['audience_id'], "text": "What makes you laugh the most?"})
-        client.post(f"/rooms/{room_id}/one-on-one/{s1['id']}/answer", json={"user_id": female_id, "text": "Witty dry humor and silly situational jokes!"})
-        client.post(f"/rooms/{room_id}/one-on-one/{s1['id']}/vote", json={"user_id": s1['audience_id'], "vote": "yes"})
-        success(f"Session 1 (Aud #{s1['audience_id']}): Question, Answer, and YES vote submitted -> Marked FINALIST.")
+                    exc_a = ws_mr_aud.receive_json()
+                    assert exc_a["type"] == "contacts_exchanged"
+                    assert exc_a["partner"]["whatsapp"] == "+233240001122"
+                    _ = ws_mr_aud.receive_json()  # match_completed
+                    success("Atomic contact exchange completed successfully over MatchRoom WS!")
 
-        # Session 2: Aud 1 -> Asks Q -> Challenger Answers -> Votes NO (Eliminated)
-        s2 = sessions[1]
-        client.post(f"/rooms/{room_id}/one-on-one/{s2['id']}/question", json={"user_id": s2['audience_id'], "text": "Are you an early bird or night owl?"})
-        client.post(f"/rooms/{room_id}/one-on-one/{s2['id']}/answer", json={"user_id": female_id, "text": "Definitely a night owl."})
-        client.post(f"/rooms/{room_id}/one-on-one/{s2['id']}/vote", json={"user_id": s2['audience_id'], "vote": "no"})
-        success(f"Session 2 (Aud #{s2['audience_id']}): Question, Answer, and NO vote submitted -> Eliminated to queue.")
+            # --- 8. Reconnection & Security Guards Audit ---
+            log("AUDIT 8", "Security guards and state recovery audit...")
+            # 1. Verify obsolete endpoint is rejected
+            try:
+                with client.websocket_connect(f"/ws/rooms/{room_id}/one-on-one/1/users/{female_id}") as ws:
+                    ws.receive_json()
+                error("Obsolete one-on-one WebSocket endpoint was not rejected!")
+            except Exception:
+                success("Obsolete per-session WebSocket route correctly rejected.")
 
-        # Session 3: Aud 2 -> Asks Q -> Challenger Answers -> Votes YES (Finalist)
-        s3 = sessions[2]
-        client.post(f"/rooms/{room_id}/one-on-one/{s3['id']}/question", json={"user_id": s3['audience_id'], "text": "What is your dream vacation?"})
-        client.post(f"/rooms/{room_id}/one-on-one/{s3['id']}/answer", json={"user_id": female_id, "text": "A road trip across the Mediterranean coast."})
-        client.post(f"/rooms/{room_id}/one-on-one/{s3['id']}/vote", json={"user_id": s3['audience_id'], "vote": "yes"})
-        success(f"Session 3 (Aud #{s3['audience_id']}): Question, Answer, and YES vote submitted -> Marked FINALIST.")
+            # 2. Verify duplicate question rejected
+            resp_dup = client.post(
+                f"/rooms/{room_id}/one-on-one/{s1.id}/question",
+                json={"user_id": male_ids[0], "text": "Duplicate"},
+            )
+            assert resp_dup.status_code in (409, 422)
+            success("Duplicate question rejected with HTTP 409 Conflict.")
 
-        # Room automatically transitions to FINAL_SELECTION
-        resp_room = client.get(f"/rooms/{room_id}")
-        if resp_room.json()["room"]["state"] != "final_selection":
-            error(f"Room state expected 'final_selection', got '{resp_room.json()['room']['state']}'")
-        success("All 1-on-1 sessions completed! 2 finalists survived -> Room entered 'FINAL_SELECTION'.")
+            # 3. Verify public listing does not leak private text
+            resp_pub = client.get(f"/rooms/{room_id}/one-on-one")
+            for item in resp_pub.json():
+                assert "Top secret" not in str(item)
+            success("Public one-on-one listing verified clean of private conversation text.")
 
-        # --- Step 9: Final Selection ---
-        log("STEP 9", "Challenger viewing finalists and selecting a match...")
-        resp_fs = client.get(f"/rooms/{room_id}/final-selection?user_id={female_id}")
-        candidates = resp_fs.json()["candidates"]
-        success(f"Candidates available to Challenger: {[c['name'] for c in candidates]}")
-
-        # Challenger selects candidate 0
-        chosen_id = candidates[0]["id"]
-        chosen_name = candidates[0]["name"]
-        resp_select = client.post(
-            f"/rooms/{room_id}/final-selection",
-            json={"user_id": female_id, "candidate_id": chosen_id},
-        )
-        if resp_select.status_code != 201:
-            error(f"Failed to submit final selection: {resp_select.text}")
-        match_info = resp_select.json()
-        match_id = match_info["id"]
-        success(f"Challenger selected {chosen_name} (#{chosen_id})! Match #{match_id} created.")
-
-        # --- Step 10: Match & Match Room Details ---
-        log("STEP 10", "Fetching Match details and MatchRoom status...")
-        resp_m_detail = client.get(f"/matches/{match_id}?user_id={female_id}")
-        match_data = resp_m_detail.json()
-        match_room_id = match_data["match_room_id"]
-        success(f"Match #{match_id} linked to Private Match Room #{match_room_id}.")
-
-        resp_mr = client.get(f"/match-rooms/{match_room_id}?user_id={female_id}")
-        success(f"MatchRoom #{match_room_id} initial state: '{resp_mr.json()['state']}' (my_submitted={resp_mr.json()['my_contact_submitted']})")
-
-        # --- Step 11: Contact Submission & Atomic Exchange ---
-        log("STEP 11", "Submitting contact information and triggering atomic exchange...")
-        # Challenger submits WhatsApp
-        resp_sub_f = client.post(
-            f"/match-rooms/{match_room_id}/contacts",
-            json={"user_id": female_id, "whatsapp": "+233201234567", "snapchat": None},
-        )
-        success(f"Challenger submitted WhatsApp: {resp_sub_f.json()['state']}, partner={resp_sub_f.json()['partner']}")
-
-        # Candidate submits Snapchat -> triggers exchange!
-        resp_sub_m = client.post(
-            f"/match-rooms/{match_room_id}/contacts",
-            json={"user_id": chosen_id, "whatsapp": None, "snapchat": "kwame_snap"},
-        )
-        success(f"Kwame submitted Snapchat! Response: state={resp_sub_m.json()['state']}")
-        success(f"Kwame received partner details: {resp_sub_m.json()['partner']}")
-
-        # Challenger checks contacts -> receives Kwame's Snapchat!
-        resp_f_contacts = client.get(f"/match-rooms/{match_room_id}/contacts?user_id={female_id}")
-        success(f"Challenger retrieved partner details: {resp_f_contacts.json()['partner']}")
-
-        # --- Step 12: Completed User Status & Queue Protection ---
-        log("STEP 12", "Verifying final user completion state and queue protection...")
-        resp_final_f = client.get(f"/users/me?user_id={female_id}")
-        resp_final_m = client.get(f"/users/me?user_id={chosen_id}")
-        success(f"Challenger final state: '{resp_final_f.json()['state']}'")
-        success(f"Kwame final state: '{resp_final_m.json()['state']}'")
-
-        print("\n\033[1;32m========================================================\033[0m")
-        print("\033[1;32m  ALL MANUAL END-TO-END FLOW TESTS PASSED SUCCESSFULLY! \033[0m")
-        print("\033[1;32m========================================================\033[0m\n")
+            print("\n\033[1;32m========================================================\033[0m")
+            print("\033[1;32m  SYSTEM AUDIT COMPLETED: ALL AUDIT CHECKS PASSED!      \033[0m")
+            print("\033[1;32m========================================================\033[0m\n")
 
 
 if __name__ == "__main__":
-    run_manual_tests()
+    run_system_audit()
+

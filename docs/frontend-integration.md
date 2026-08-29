@@ -120,13 +120,12 @@ The backend puts the user in the correct queue based on gender. When enough part
 
 ---
 
-### Step 4: One-on-One Private Sessions
-Surviving audience members interact with the challenger sequentially:
-1. Check session details via `GET /rooms/{room_id}/one-on-one`.
-2. Connect to private session channel:
-   ```text
-   WS /ws/rooms/{room_id}/one-on-one/{session_id}/users/{user_id}
-   ```
+### Step 4: One-on-One Logical Sessions (Multiplexed via GameRoom WS)
+Surviving audience members interact with the challenger sequentially inside the active GameRoom:
+1. **Single WebSocket Connection**: The frontend maintains its existing connection to `WS /ws/rooms/{room_id}/users/{user_id}`. No secondary or separate one-on-one WebSocket room is created.
+2. **Targeted Message Filtering**:
+   - The backend delivers private session messages (`one_on_one_started`, `one_on_one_question`, `one_on_one_answer`, `one_on_one_completed`) **only** to the challenger and the active audience member for that session.
+   - Non-active audience members receive public `one_on_one_progress` updates (`{"completed": X, "total": Y}`) without seeing private questions, answers, or votes.
 3. Audience submits question:
    ```http
    POST /rooms/{room_id}/one-on-one/{session_id}/question
@@ -142,7 +141,7 @@ Surviving audience members interact with the challenger sequentially:
    POST /rooms/{room_id}/one-on-one/{session_id}/vote
    Body: {"user_id": {id}, "vote": "yes"}
    ```
-6. The backend automatically proceeds to the next session.
+6. The backend automatically completes the session and activates the next logical session. Reconnecting users recover state via `GET /rooms/{room_id}/one-on-one/current?user_id={id}` or immediate WS push.
 
 ---
 
