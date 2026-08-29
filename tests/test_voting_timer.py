@@ -71,8 +71,8 @@ async def test_voting_timer_auto_finalizes_and_eliminates_non_voters(client, db)
         assert p.left_at is not None
 
         db.refresh(user)
-        assert user.state == UserState.QUEUED
-        assert user.queued_at is not None
+        assert user.state == UserState.WAITING
+
 
 
 @pytest.mark.asyncio
@@ -127,10 +127,9 @@ async def test_voting_timer_zero_survivors_goes_to_completed(client, db):
     db.refresh(room)
     assert room.state == RoomState.COMPLETED
 
-    # Check challenger was evicted and re-queued
+    # Check challenger was evicted and set to WAITING
     db.refresh(challenger)
-    assert challenger.state == UserState.QUEUED
-    assert challenger.queued_at is not None
+    assert challenger.state == UserState.WAITING
 
     p_challenger = db.get(RoomParticipant, (room.id, challenger.id))
     assert p_challenger.status == ParticipantStatus.ELIMINATED

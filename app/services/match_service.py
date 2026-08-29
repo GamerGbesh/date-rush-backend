@@ -258,8 +258,7 @@ class MatchService:
                 p.left_at = now
                 u = db.get(User, p.user_id)
                 if u:
-                    u.state = UserState.QUEUED
-                    u.queued_at = now
+                    u.state = UserState.WAITING
                     eliminated_users.append(u)
 
             db.commit()

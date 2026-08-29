@@ -82,73 +82,29 @@ class QuestioningService:
 
             now = datetime.now(timezone.utc)
 
-            if len(answers) == 0:
-                logger.warning(
-                    "Challenger %s answered 0 questions before questioning timeout for room %d. Re-queuing all participants.",
-                    room.challenger_id,
-                    room.id,
-                )
-                active_participants = [
-                    p for p in room.participants if p.left_at is None
-                ]
-                for p in active_participants:
-                    p.status = ParticipantStatus.ELIMINATED
-                    p.left_at = now
-                    user = db.get(User, p.user_id)
-                    if user:
-                        user.state = UserState.QUEUED
-                        user.queued_at = now
+            logger.info(
+                "Questioning timeout for room %d (challenger %s, %d answered). Auto-filling remaining with '[No Response]' and transitioning to VOTING.",
+                room.id,
+                room.challenger_id,
+                len(answers),
+            )
+            answered_question_ids = {a.question_id for a in answers}
+            for round_num in range(1, settings.PUBLIC_QUESTION_ROUNDS + 1):
+                rq = self.get_room_question_for_round(db, room.id, round_num)
+                if rq and rq.question_id not in answered_question_ids:
+                    missing_answer = Answer(
+                        room_id=room.id,
+                        question_id=rq.question_id,
+                        user_id=room.challenger_id,
+                        answer="[No Response]",
+                    )
+                    db.add(missing_answer)
+                    db.commit()
+                    await self.broadcast_answer_revealed(
+                        room.id, round_num, rq.question_id, "[No Response]"
+                    )
 
-                room.state = RoomState.COMPLETED
-                db.commit()
-
-                # Broadcast timeout error to room participants
-                await ws_manager.broadcast(
-                    room.id,
-                    {
-                        "type": "questioning_timeout",
-                        "room_id": room.id,
-                        "error": "Challenger did not respond to any questions in time. All participants have been returned to the queue.",
-                    },
-                )
-                await ws_manager.broadcast(
-                    room.id,
-                    {
-                        "type": "room_completed",
-                        "room_id": room.id,
-                    },
-                )
-
-                # Disconnect sockets
-                for p in active_participants:
-                    ws_manager.disconnect(room.id, p.user_id)
-
-                queue_manager.try_create_rooms(db)
-            else:
-                logger.info(
-                    "Challenger %s answered %d/%d questions for room %d before timeout. Auto-filling remaining with '[No Response]' and transitioning to VOTING.",
-                    room.challenger_id,
-                    len(answers),
-                    settings.PUBLIC_QUESTION_ROUNDS,
-                    room.id,
-                )
-                answered_question_ids = {a.question_id for a in answers}
-                for round_num in range(1, settings.PUBLIC_QUESTION_ROUNDS + 1):
-                    rq = self.get_room_question_for_round(db, room.id, round_num)
-                    if rq and rq.question_id not in answered_question_ids:
-                        missing_answer = Answer(
-                            room_id=room.id,
-                            question_id=rq.question_id,
-                            user_id=room.challenger_id,
-                            answer="[No Response]",
-                        )
-                        db.add(missing_answer)
-                        db.commit()
-                        await self.broadcast_answer_revealed(
-                            room.id, round_num, rq.question_id, "[No Response]"
-                        )
-
-                await room_state_service.transition(db, room.id, RoomState.VOTING)
+            await room_state_service.transition(db, room.id, RoomState.VOTING)
 
     def get_room_question_for_round(
         self, db: Session, room_id: int, round_number: int

@@ -281,7 +281,7 @@ class VotingService:
             )
             vote_map = {v.voter_id: v.vote for v in votes}
 
-            eliminated_users: list[User] = []
+            eliminated_users: list[tuple[User, str]] = []
             survivors: list[RoomParticipant] = []
 
             for p in active_participants:
@@ -296,11 +296,11 @@ class VotingService:
 
                     user = db.get(User, p.user_id)
                     if user:
-                        user.state = UserState.QUEUED
-                        user.queued_at = datetime.now(timezone.utc)
-                        eliminated_users.append(user)
+                        user.state = UserState.WAITING
+                        reason = "You voted No on the challenger." if choice == VoteChoice.NO else "You did not cast your vote in time."
+                        eliminated_users.append((user, reason))
 
-            # If zero survivors remain, also eliminate and re-queue the challenger
+            # If zero survivors remain, also eliminate the challenger
             if len(survivors) == 0 and room.challenger_id is not None:
                 p_challenger = next(
                     (
@@ -315,17 +315,16 @@ class VotingService:
                     p_challenger.left_at = datetime.now(timezone.utc)
                     challenger_user = db.get(User, p_challenger.user_id)
                     if challenger_user:
-                        challenger_user.state = UserState.QUEUED
-                        challenger_user.queued_at = datetime.now(timezone.utc)
-                        eliminated_users.append(challenger_user)
+                        challenger_user.state = UserState.WAITING
+                        eliminated_users.append((challenger_user, "No one voted for you. Better luck next time!"))
 
             db.commit()
             db.refresh(room)
 
             # Notify and disconnect eliminated participants
-            for user in eliminated_users:
+            for user, reason in eliminated_users:
                 await ws_manager.send_to_user(
-                    room.id, user.id, {"type": "eliminated", "room_id": room.id}
+                    room.id, user.id, {"type": "eliminated", "room_id": room.id, "reason": reason}
                 )
                 ws_manager.disconnect(room.id, user.id)
 
@@ -353,11 +352,6 @@ class VotingService:
                 next_state = RoomState.COMPLETED
 
             await room_state_service.transition(db, room.id, next_state)
-
-            # Trigger queue manager room check now that eliminated users are back in queue
-            from app.services.queue_manager import queue_manager
-
-            queue_manager.try_create_rooms(db)
 
 
 voting_service = VotingService()

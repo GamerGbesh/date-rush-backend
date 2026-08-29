@@ -8,6 +8,10 @@ class QueueJoinRequest(BaseModel):
     gender: Gender
 
 
+class QueueRejoinRequest(BaseModel):
+    user_id: int
+
+
 class QueueJoinResponse(BaseModel):
     user_id: int
     state: UserState
@@ -17,3 +21,4 @@ class QueueJoinResponse(BaseModel):
 class QueueStatusResponse(BaseModel):
     male: int
     female: int
+

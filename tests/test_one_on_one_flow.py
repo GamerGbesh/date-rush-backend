@@ -1,6 +1,14 @@
 import pytest
 
-from app.enums import Gender, OneOnOneSessionState, ParticipantStatus, PlayerRole, RoomState, UserState, VoteChoice
+from app.enums import (
+    Gender,
+    OneOnOneSessionState,
+    ParticipantStatus,
+    PlayerRole,
+    RoomState,
+    UserState,
+    VoteChoice,
+)
 from app.models.one_on_one_session import OneOnOneSession
 from app.models.room import Room, RoomParticipant
 from app.models.user import User
@@ -26,7 +34,11 @@ def _setup_one_on_one_room(db, count: int = 3) -> tuple[Room, User, list[User]]:
     db.add(room)
     db.flush()
 
-    db.add(RoomParticipant(room_id=room.id, user_id=challenger.id, role=PlayerRole.CHALLENGER))
+    db.add(
+        RoomParticipant(
+            room_id=room.id, user_id=challenger.id, role=PlayerRole.CHALLENGER
+        )
+    )
     for a in audience:
         db.add(RoomParticipant(room_id=room.id, user_id=a.id, role=PlayerRole.AUDIENCE))
 
@@ -53,7 +65,10 @@ class TestOneOnOneFlow:
         # 1. Aud 0 asks question
         resp1 = client.post(
             f"/rooms/{room.id}/one-on-one/{s1.id}/question",
-            json={"user_id": audience[0].id, "text": "What is your philosophy on life?"},
+            json={
+                "user_id": audience[0].id,
+                "text": "What is your philosophy on life?",
+            },
         )
         assert resp1.status_code == 201
         assert resp1.json()["question"] == "What is your philosophy on life?"
@@ -61,7 +76,10 @@ class TestOneOnOneFlow:
         # 2. Challenger answers
         resp2 = client.post(
             f"/rooms/{room.id}/one-on-one/{s1.id}/answer",
-            json={"user_id": challenger.id, "text": "Always keep learning and growing."},
+            json={
+                "user_id": challenger.id,
+                "text": "Always keep learning and growing.",
+            },
         )
         assert resp2.status_code == 201
         assert resp2.json()["state"] == "voting"
@@ -106,8 +124,7 @@ class TestOneOnOneFlow:
         assert p1.left_at is not None
 
         u1 = db.get(User, audience[1].id)
-        assert u1.state == UserState.QUEUED
-        assert u1.queued_at is not None
+        assert u1.state == UserState.WAITING
 
         assert s3.state == OneOnOneSessionState.ACTIVE
 
@@ -134,13 +151,27 @@ class TestOneOnOneFlow:
         room, challenger, audience = _setup_one_on_one_room(db, count=2)
         await room_state_service.transition(db, room.id, RoomState.ONE_ON_ONE)
 
-        sessions = db.query(OneOnOneSession).where(OneOnOneSession.room_id == room.id).order_by(OneOnOneSession.sequence).all()
+        sessions = (
+            db.query(OneOnOneSession)
+            .where(OneOnOneSession.room_id == room.id)
+            .order_by(OneOnOneSession.sequence)
+            .all()
+        )
 
         # Both vote NO
         for idx, (s, aud) in enumerate(zip(sessions, audience)):
-            client.post(f"/rooms/{room.id}/one-on-one/{s.id}/question", json={"user_id": aud.id, "text": f"Q{idx}"})
-            client.post(f"/rooms/{room.id}/one-on-one/{s.id}/answer", json={"user_id": challenger.id, "text": f"A{idx}"})
-            client.post(f"/rooms/{room.id}/one-on-one/{s.id}/vote", json={"user_id": aud.id, "vote": "no"})
+            client.post(
+                f"/rooms/{room.id}/one-on-one/{s.id}/question",
+                json={"user_id": aud.id, "text": f"Q{idx}"},
+            )
+            client.post(
+                f"/rooms/{room.id}/one-on-one/{s.id}/answer",
+                json={"user_id": challenger.id, "text": f"A{idx}"},
+            )
+            client.post(
+                f"/rooms/{room.id}/one-on-one/{s.id}/vote",
+                json={"user_id": aud.id, "vote": "no"},
+            )
 
         db.refresh(room)
         assert room.state == RoomState.COMPLETED
@@ -160,7 +191,9 @@ class TestOneOnOneValidations:
         assert resp.status_code == 403
 
     @pytest.mark.asyncio
-    async def test_other_audience_cannot_ask_question_for_active_session(self, client, db):
+    async def test_other_audience_cannot_ask_question_for_active_session(
+        self, client, db
+    ):
         room, _, audience = _setup_one_on_one_room(db, count=2)
         await room_state_service.transition(db, room.id, RoomState.ONE_ON_ONE)
         s1 = one_on_one_service.get_active_session(db, room.id)

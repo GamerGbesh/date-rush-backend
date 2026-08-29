@@ -197,14 +197,23 @@ class QueueManager:
         try:
             import asyncio
             from app.services.websocket_manager import ws_manager
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                for uid in user_ids:
-                    loop.create_task(
-                        ws_manager.send_to_queue_user(
-                            uid, {"type": "room_assigned", "room_id": room_id}
-                        )
-                    )
+
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            for uid in user_ids:
+                coro = ws_manager.send_to_queue_user(
+                    uid, {"type": "room_assigned", "room_id": room_id}
+                )
+                if loop and loop.is_running():
+                    loop.create_task(coro)
+                else:
+                    try:
+                        asyncio.run(coro)
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -230,9 +239,19 @@ class QueueManager:
                 "active_rooms": active_rooms,
             }
 
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                loop.create_task(ws_manager.broadcast_queue(payload))
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            coro = ws_manager.broadcast_queue(payload)
+            if loop and loop.is_running():
+                loop.create_task(coro)
+            else:
+                try:
+                    asyncio.run(coro)
+                except Exception:
+                    pass
         except Exception:
             pass
 

@@ -30,12 +30,18 @@ class Settings(BaseSettings):
     CORS_ALLOW_HEADERS: list[str] = ["*"]
 
     # Duration (in seconds) for each game phase timer (can be overridden via env vars)
-    QUESTIONING_TIMEOUT_SECONDS: int = 480  # 8 minutes for challenger to answer public questions
-    VOTING_TIMEOUT_SECONDS: int = 30        # 30 seconds for public voting
-    ONE_ON_ONE_QUESTION_TIMEOUT_SECONDS: int = 60  # 1 minute for audience to ask private question
-    ONE_ON_ONE_ANSWER_TIMEOUT_SECONDS: int = 60    # 1 minute for challenger to answer private question
-    ONE_ON_ONE_VOTE_TIMEOUT_SECONDS: int = 30      # 30 seconds for audience private vote
-    FINAL_SELECTION_TIMEOUT_SECONDS: int = 60      # 1 minute for challenger final selection
+    QUESTIONING_TIMEOUT_SECONDS: int = (
+        2 * 60
+    )  # 2 minutes for challenger to answer public questions
+    VOTING_TIMEOUT_SECONDS: int = 30  # 30 seconds for public voting
+    ONE_ON_ONE_QUESTION_TIMEOUT_SECONDS: int = (
+        60  # 1 minute for audience to ask private question
+    )
+    ONE_ON_ONE_ANSWER_TIMEOUT_SECONDS: int = (
+        60  # 1 minute for challenger to answer private question
+    )
+    ONE_ON_ONE_VOTE_TIMEOUT_SECONDS: int = 30  # 30 seconds for audience private vote
+    FINAL_SELECTION_TIMEOUT_SECONDS: int = 60  # 1 minute for challenger final selection
 
     # Logging configuration
     LOG_LEVEL: str = "INFO"
