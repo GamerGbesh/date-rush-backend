@@ -43,11 +43,13 @@ def get_current_user_profile(
     room_id: int | None = None
     role: str | None = None
     participant = db.execute(
-        select(RoomParticipant).where(
+        select(RoomParticipant)
+        .where(
             RoomParticipant.user_id == user.id,
             RoomParticipant.left_at.is_(None),
         )
-    ).scalar_one_or_none()
+        .order_by(RoomParticipant.joined_at.desc())
+    ).scalars().first()
 
     if participant:
         room_id = participant.room_id
