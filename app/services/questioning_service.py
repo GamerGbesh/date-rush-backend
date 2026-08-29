@@ -20,6 +20,7 @@ from app.models.question import Question
 from app.models.room import Room
 from app.models.room_question import RoomQuestion
 from app.services.room_state_service import room_state_service
+from app.services.timer_service import timer_service
 from app.services.websocket_manager import ws_manager
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,127 @@ logger = logging.getLogger(__name__)
 
 class QuestioningService:
     """Manages active questioning, answer validation, and automatic round progression."""
+
+    def start_questioning_timer(
+        self, room_id: int, duration_seconds: float | None = None
+    ) -> None:
+        """Start countdown timer for challenger to answer the public questions."""
+        duration = (
+            duration_seconds
+            if duration_seconds is not None
+            else float(settings.QUESTIONING_TIMEOUT_SECONDS)
+        )
+
+        async def _on_timeout():
+            await self.handle_questioning_timeout(room_id)
+
+        timer_service.start_timer(
+            room_id=room_id,
+            timer_type="questioning",
+            duration_seconds=duration,
+            on_timeout=_on_timeout,
+        )
+
+    def cancel_questioning_timer(self, room_id: int) -> None:
+        """Cancel active questioning timer for a room."""
+        timer_service.cancel_timer(room_id, "questioning")
+
+    async def handle_questioning_timeout(self, room_id: int) -> None:
+        """
+        Handle questioning timeout when challenger timer expires:
+        - If 0 questions answered: Disqualify challenger, return all participants to queue, complete room.
+        - If partial answers: Auto-fill remaining questions with '[No Response]' and advance to VOTING.
+        """
+        from datetime import datetime, timezone
+        from app.database import SessionLocal
+        from app.enums import ParticipantStatus, PlayerRole, UserState
+        from app.models.room import RoomParticipant
+        from app.models.user import User
+        from app.services.queue_manager import queue_manager
+
+        with SessionLocal() as db:
+            room = db.get(Room, room_id)
+            if not room or room.state != RoomState.QUESTIONING:
+                return
+
+            answers = list(
+                db.execute(
+                    select(Answer).where(
+                        Answer.room_id == room.id,
+                        Answer.user_id == room.challenger_id,
+                    )
+                ).scalars()
+            )
+
+            now = datetime.now(timezone.utc)
+
+            if len(answers) == 0:
+                logger.warning(
+                    "Challenger %s answered 0 questions before questioning timeout for room %d. Re-queuing all participants.",
+                    room.challenger_id,
+                    room.id,
+                )
+                active_participants = [
+                    p for p in room.participants if p.left_at is None
+                ]
+                for p in active_participants:
+                    p.status = ParticipantStatus.ELIMINATED
+                    p.left_at = now
+                    user = db.get(User, p.user_id)
+                    if user:
+                        user.state = UserState.QUEUED
+                        user.queued_at = now
+
+                room.state = RoomState.COMPLETED
+                db.commit()
+
+                # Broadcast timeout error to room participants
+                await ws_manager.broadcast(
+                    room.id,
+                    {
+                        "type": "questioning_timeout",
+                        "room_id": room.id,
+                        "error": "Challenger did not respond to any questions in time. All participants have been returned to the queue.",
+                    },
+                )
+                await ws_manager.broadcast(
+                    room.id,
+                    {
+                        "type": "room_completed",
+                        "room_id": room.id,
+                    },
+                )
+
+                # Disconnect sockets
+                for p in active_participants:
+                    ws_manager.disconnect(room.id, p.user_id)
+
+                queue_manager.try_create_rooms(db)
+            else:
+                logger.info(
+                    "Challenger %s answered %d/%d questions for room %d before timeout. Auto-filling remaining with '[No Response]' and transitioning to VOTING.",
+                    room.challenger_id,
+                    len(answers),
+                    settings.PUBLIC_QUESTION_ROUNDS,
+                    room.id,
+                )
+                answered_question_ids = {a.question_id for a in answers}
+                for round_num in range(1, settings.PUBLIC_QUESTION_ROUNDS + 1):
+                    rq = self.get_room_question_for_round(db, room.id, round_num)
+                    if rq and rq.question_id not in answered_question_ids:
+                        missing_answer = Answer(
+                            room_id=room.id,
+                            question_id=rq.question_id,
+                            user_id=room.challenger_id,
+                            answer="[No Response]",
+                        )
+                        db.add(missing_answer)
+                        db.commit()
+                        await self.broadcast_answer_revealed(
+                            room.id, round_num, rq.question_id, "[No Response]"
+                        )
+
+                await room_state_service.transition(db, room.id, RoomState.VOTING)
 
     def get_room_question_for_round(
         self, db: Session, room_id: int, round_number: int

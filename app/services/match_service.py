@@ -29,7 +29,9 @@ from app.models.match import Match
 from app.models.room import Room, RoomParticipant
 from app.models.user import User
 from app.schemas.match import FinalCandidateRead, FinalSelectionStatusResponse
+from app.config import settings
 from app.services.room_state_service import room_state_service
+from app.services.timer_service import timer_service
 from app.services.websocket_manager import ws_manager
 
 logger = logging.getLogger(__name__)
@@ -44,7 +46,58 @@ def _get_room_lock(room_id: int) -> asyncio.Lock:
 
 
 class MatchService:
-    """Service managing final selection and match creation."""
+    """Service managing final selection and match creation with phase timer."""
+
+    def start_final_selection_timer(
+        self, room_id: int, duration_seconds: float | None = None
+    ) -> None:
+        """Start countdown for challenger to pick a finalist."""
+        duration = (
+            duration_seconds
+            if duration_seconds is not None
+            else float(settings.FINAL_SELECTION_TIMEOUT_SECONDS)
+        )
+
+        async def _on_timeout():
+            await self.handle_final_selection_timeout(room_id)
+
+        timer_service.start_timer(
+            room_id=room_id,
+            timer_type="final_selection",
+            duration_seconds=duration,
+            on_timeout=_on_timeout,
+        )
+
+    def cancel_final_selection_timer(self, room_id: int) -> None:
+        """Cancel active final selection timer."""
+        timer_service.cancel_timer(room_id, "final_selection")
+
+    async def handle_final_selection_timeout(self, room_id: int) -> None:
+        """Challenger failed to make final selection in time -> auto-select first finalist."""
+        from app.database import SessionLocal
+        with SessionLocal() as db:
+            room = db.get(Room, room_id)
+            if not room or room.state != RoomState.FINAL_SELECTION:
+                return
+
+            finalists = self.get_eligible_finalists(db, room.id)
+            if not finalists:
+                logger.warning("Final selection timeout for room %d but no eligible finalists found", room.id)
+                return
+
+            selected_candidate = finalists[0]
+            logger.info(
+                "Final selection timeout for room %d -> auto-selecting candidate %d (%s)",
+                room.id,
+                selected_candidate.id,
+                selected_candidate.name,
+            )
+            await self.create_match(
+                db=db,
+                room_id=room.id,
+                challenger_id=room.challenger_id,
+                candidate_id=selected_candidate.id,
+            )
 
     def get_eligible_finalists(self, db: Session, room_id: int) -> list[User]:
         """Fetch all active audience participants marked as FINALIST for a room."""
@@ -112,6 +165,7 @@ class MatchService:
         """
         lock = _get_room_lock(room_id)
         async with lock:
+            self.cancel_final_selection_timer(room_id)
             room = db.get(Room, room_id)
             if not room:
                 raise RoomNotFoundError(room_id)
