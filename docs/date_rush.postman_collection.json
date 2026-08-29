@@ -1,0 +1,473 @@
+{
+  "info": {
+    "_postman_id": "d41e7b20-1a2b-4c3d-9e5f-6a7b8c9d0e1f",
+    "name": "Date Rush API & WebSockets",
+    "description": "Complete Postman collection for Date Rush live matchmaking system, covering all REST endpoints and WebSocket channels.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://127.0.0.1:8000", "type": "string" },
+    { "key": "ws_url", "value": "ws://127.0.0.1:8000", "type": "string" },
+    { "key": "challenger_id", "value": "1", "type": "string" },
+    { "key": "aud1_id", "value": "2", "type": "string" },
+    { "key": "aud2_id", "value": "3", "type": "string" },
+    { "key": "aud3_id", "value": "4", "type": "string" },
+    { "key": "aud4_id", "value": "5", "type": "string" },
+    { "key": "aud5_id", "value": "6", "type": "string" },
+    { "key": "room_id", "value": "1", "type": "string" },
+    { "key": "session_id", "value": "1", "type": "string" },
+    { "key": "match_id", "value": "1", "type": "string" },
+    { "key": "match_room_id", "value": "1", "type": "string" }
+  ],
+  "item": [
+    {
+      "name": "01 - Health & Queue",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": ["{{base_url}}"],
+              "path": ["health"]
+            }
+          }
+        },
+        {
+          "name": "Get Queue Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/queue/status",
+              "host": ["{{base_url}}"],
+              "path": ["queue", "status"]
+            }
+          }
+        },
+        {
+          "name": "Join Queue - Female (Challenger)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Ama\",\n  \"gender\": \"female\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/queue/join",
+              "host": ["{{base_url}}"],
+              "path": ["queue", "join"]
+            }
+          }
+        },
+        {
+          "name": "Join Queue - Male 1",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Kofi\",\n  \"gender\": \"male\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/queue/join",
+              "host": ["{{base_url}}"],
+              "path": ["queue", "join"]
+            }
+          }
+        },
+        {
+          "name": "Join Queue - Male 2",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Yaw\",\n  \"gender\": \"male\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/queue/join",
+              "host": ["{{base_url}}"],
+              "path": ["queue", "join"]
+            }
+          }
+        },
+        {
+          "name": "Join Queue - Male 3",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Kwame\",\n  \"gender\": \"male\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/queue/join",
+              "host": ["{{base_url}}"],
+              "path": ["queue", "join"]
+            }
+          }
+        },
+        {
+          "name": "Join Queue - Male 4",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Kojo\",\n  \"gender\": \"male\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/queue/join",
+              "host": ["{{base_url}}"],
+              "path": ["queue", "join"]
+            }
+          }
+        },
+        {
+          "name": "Join Queue - Male 5 (Triggers Room Creation)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Kwabena\",\n  \"gender\": \"male\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/queue/join",
+              "host": ["{{base_url}}"],
+              "path": ["queue", "join"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 - User Identity & State Recovery",
+      "item": [
+        {
+          "name": "Get Current User Profile (/users/me)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/users/me?user_id={{challenger_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["users", "me"],
+              "query": [{ "key": "user_id", "value": "{{challenger_id}}" }]
+            }
+          }
+        },
+        {
+          "name": "Get User by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/users/{{challenger_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["users", "{{challenger_id}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 - Admin Controls",
+      "item": [
+        {
+          "name": "Admin - List Active Rooms",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/rooms",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "rooms"]
+            }
+          }
+        },
+        {
+          "name": "Admin - Inspect Room Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/rooms/{{room_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "rooms", "{{room_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Admin - Transition Room State",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"state\": \"questioning\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/rooms/{{room_id}}/transition",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "rooms", "{{room_id}}", "transition"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 - Public Game Room (Questioning & Voting)",
+      "item": [
+        {
+          "name": "Get Room Public Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/rooms/{{room_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["rooms", "{{room_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Challenger Submit Answer",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{challenger_id}},\n  \"answer\": \"I love outdoor adventures and good food!\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rooms/{{room_id}}/answers",
+              "host": ["{{base_url}}"],
+              "path": ["rooms", "{{room_id}}", "answers"]
+            }
+          }
+        },
+        {
+          "name": "Get Public Voting Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/rooms/{{room_id}}/voting?user_id={{aud1_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["rooms", "{{room_id}}", "voting"],
+              "query": [{ "key": "user_id", "value": "{{aud1_id}}" }]
+            }
+          }
+        },
+        {
+          "name": "Submit Public Vote (YES / NO)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{aud1_id}},\n  \"vote\": \"yes\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rooms/{{room_id}}/vote",
+              "host": ["{{base_url}}"],
+              "path": ["rooms", "{{room_id}}", "vote"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 - One-on-One Sessions",
+      "item": [
+        {
+          "name": "List One-on-One Sessions Summary",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/rooms/{{room_id}}/one-on-one",
+              "host": ["{{base_url}}"],
+              "path": ["rooms", "{{room_id}}", "one-on-one"]
+            }
+          }
+        },
+        {
+          "name": "Get Current Active One-on-One Session",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/rooms/{{room_id}}/one-on-one/current",
+              "host": ["{{base_url}}"],
+              "path": ["rooms", "{{room_id}}", "one-on-one", "current"]
+            }
+          }
+        },
+        {
+          "name": "Audience Submit Private Question",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{aud1_id}},\n  \"text\": \"What is your favorite travel destination?\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rooms/{{room_id}}/one-on-one/{{session_id}}/question",
+              "host": ["{{base_url}}"],
+              "path": ["rooms", "{{room_id}}", "one-on-one", "{{session_id}}", "question"]
+            }
+          }
+        },
+        {
+          "name": "Challenger Submit Private Answer",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{challenger_id}},\n  \"text\": \"I love visiting Japan and exploring the culture.\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rooms/{{room_id}}/one-on-one/{{session_id}}/answer",
+              "host": ["{{base_url}}"],
+              "path": ["rooms", "{{room_id}}", "one-on-one", "{{session_id}}", "answer"]
+            }
+          }
+        },
+        {
+          "name": "Audience Submit Private Vote (YES/NO)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{aud1_id}},\n  \"vote\": \"yes\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rooms/{{room_id}}/one-on-one/{{session_id}}/vote",
+              "host": ["{{base_url}}"],
+              "path": ["rooms", "{{room_id}}", "one-on-one", "{{session_id}}", "vote"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "06 - Final Selection & Match",
+      "item": [
+        {
+          "name": "Get Final Selection Candidates (Challenger view)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/rooms/{{room_id}}/final-selection?user_id={{challenger_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["rooms", "{{room_id}}", "final-selection"],
+              "query": [{ "key": "user_id", "value": "{{challenger_id}}" }]
+            }
+          }
+        },
+        {
+          "name": "Challenger Submit Final Selection",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{challenger_id}},\n  \"candidate_id\": {{aud1_id}}\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/rooms/{{room_id}}/final-selection",
+              "host": ["{{base_url}}"],
+              "path": ["rooms", "{{room_id}}", "final-selection"]
+            }
+          }
+        },
+        {
+          "name": "Get Match Detail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/matches/{{match_id}}?user_id={{challenger_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["matches", "{{match_id}}"],
+              "query": [{ "key": "user_id", "value": "{{challenger_id}}" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 - Match Room & Contact Exchange",
+      "item": [
+        {
+          "name": "Get Match Room Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/match-rooms/{{match_room_id}}?user_id={{challenger_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["match-rooms", "{{match_room_id}}"],
+              "query": [{ "key": "user_id", "value": "{{challenger_id}}" }]
+            }
+          }
+        },
+        {
+          "name": "Challenger Submit Contact (WhatsApp / Snapchat)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{challenger_id}},\n  \"whatsapp\": \"+233201234567\",\n  \"snapchat\": null\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/match-rooms/{{match_room_id}}/contacts",
+              "host": ["{{base_url}}"],
+              "path": ["match-rooms", "{{match_room_id}}", "contacts"]
+            }
+          }
+        },
+        {
+          "name": "Matched Candidate Submit Contact (Triggers Exchange)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": {{aud1_id}},\n  \"whatsapp\": null,\n  \"snapchat\": \"kofi_snap\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/match-rooms/{{match_room_id}}/contacts",
+              "host": ["{{base_url}}"],
+              "path": ["match-rooms", "{{match_room_id}}", "contacts"]
+            }
+          }
+        },
+        {
+          "name": "Get Exchanged Contacts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/match-rooms/{{match_room_id}}/contacts?user_id={{challenger_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["match-rooms", "{{match_room_id}}", "contacts"],
+              "query": [{ "key": "user_id", "value": "{{challenger_id}}" }]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
