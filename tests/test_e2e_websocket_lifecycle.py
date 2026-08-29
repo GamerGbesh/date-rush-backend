@@ -101,44 +101,79 @@ class TestE2EWebSocketLifecycle:
         s1 = db.query(OneOnOneSession).where(OneOnOneSession.room_id == room.id, OneOnOneSession.sequence == 1).one()
         s2 = db.query(OneOnOneSession).where(OneOnOneSession.room_id == room.id, OneOnOneSession.sequence == 2).one()
 
-        # 2. Private 1-on-1 Channel for Session 1 (Aud 1)
-        with client.websocket_connect(f"/ws/rooms/{room.id}/one-on-one/{s1.id}/users/{aud1.id}") as ws_ooo_aud1:
-            with client.websocket_connect(f"/ws/rooms/{room.id}/one-on-one/{s1.id}/users/{challenger.id}") as ws_ooo_chal:
-                # Initial private state
-                s_state_a = ws_ooo_aud1.receive_json()
-                assert s_state_a["type"] == "private_session_state"
+        # 2. Maintain Single GameRoom WebSocket throughout One-on-One Phase
+        with client.websocket_connect(f"/ws/rooms/{room.id}/users/{aud1.id}") as ws_aud1:
+            with client.websocket_connect(f"/ws/rooms/{room.id}/users/{aud2.id}") as ws_aud2:
+                with client.websocket_connect(f"/ws/rooms/{room.id}/users/{challenger.id}") as ws_chal:
+                    # Initial connection delivers room_state_changed + one_on_one state
+                    _ = ws_aud1.receive_json()  # room_state_changed
+                    s1_init_a1 = ws_aud1.receive_json()
+                    assert s1_init_a1["type"] == "one_on_one_started"
 
-                s_state_c = ws_ooo_chal.receive_json()
-                assert s_state_c["type"] == "private_session_state"
+                    _ = ws_aud2.receive_json()  # room_state_changed
+                    s1_init_a2 = ws_aud2.receive_json()
+                    assert s1_init_a2["type"] == "one_on_one_progress"
 
-                # Aud 1 posts private question
-                client.post(f"/rooms/{room.id}/one-on-one/{s1.id}/question", json={"user_id": aud1.id, "text": "Secret Q"})
-                q_ev_c = ws_ooo_chal.receive_json()
-                assert q_ev_c["type"] == "private_question"
-                assert q_ev_c["text"] == "Secret Q"
+                    _ = ws_chal.receive_json()  # room_state_changed
+                    s1_init_c = ws_chal.receive_json()
+                    assert s1_init_c["type"] == "one_on_one_started"
 
-                _ = ws_ooo_aud1.receive_json()
+                    # --- SESSION 1 (Challenger <-> Aud 1) ---
+                    # Aud 1 posts private question
+                    client.post(f"/rooms/{room.id}/one-on-one/{s1.id}/question", json={"user_id": aud1.id, "text": "Secret Q"})
+                    q_ev_c = ws_chal.receive_json()
+                    assert q_ev_c["type"] == "one_on_one_question"
+                    assert q_ev_c["question"] == "Secret Q"
 
-                # Challenger posts private answer
-                client.post(f"/rooms/{room.id}/one-on-one/{s1.id}/answer", json={"user_id": challenger.id, "text": "Secret A"})
-                a_ev_a = ws_ooo_aud1.receive_json()
-                assert a_ev_a["type"] == "private_answer"
-                assert a_ev_a["text"] == "Secret A"
+                    q_ev_a = ws_aud1.receive_json()
+                    assert q_ev_a["type"] == "one_on_one_question"
 
-                _ = ws_ooo_chal.receive_json()
+                    # Challenger posts private answer
+                    client.post(f"/rooms/{room.id}/one-on-one/{s1.id}/answer", json={"user_id": challenger.id, "text": "Secret A"})
+                    a_ev_a = ws_aud1.receive_json()
+                    assert a_ev_a["type"] == "one_on_one_answer"
+                    assert a_ev_a["answer"] == "Secret A"
 
-                # Aud 1 votes YES
-                client.post(f"/rooms/{room.id}/one-on-one/{s1.id}/vote", json={"user_id": aud1.id, "vote": "yes"})
-                comp_ev_a = ws_ooo_aud1.receive_json()
-                assert comp_ev_a["type"] == "session_completed"
+                    a_ev_c = ws_chal.receive_json()
+                    assert a_ev_c["type"] == "one_on_one_answer"
 
-                comp_ev_c = ws_ooo_chal.receive_json()
-                assert comp_ev_c["type"] == "session_completed"
+                    # Aud 1 votes YES
+                    client.post(f"/rooms/{room.id}/one-on-one/{s1.id}/vote", json={"user_id": aud1.id, "vote": "yes"})
+                    comp_ev_a = ws_aud1.receive_json()
+                    assert comp_ev_a["type"] == "one_on_one_completed"
 
-        # Session 2 (Aud 2) votes YES
-        client.post(f"/rooms/{room.id}/one-on-one/{s2.id}/question", json={"user_id": aud2.id, "text": "Q2"})
-        client.post(f"/rooms/{room.id}/one-on-one/{s2.id}/answer", json={"user_id": challenger.id, "text": "A2"})
-        client.post(f"/rooms/{room.id}/one-on-one/{s2.id}/vote", json={"user_id": aud2.id, "vote": "yes"})
+                    comp_ev_c = ws_chal.receive_json()
+                    assert comp_ev_c["type"] == "one_on_one_completed"
+
+                    # Progress events
+                    assert ws_aud1.receive_json()["type"] == "one_on_one_progress"
+                    assert ws_aud2.receive_json()["type"] == "one_on_one_progress"
+                    assert ws_chal.receive_json()["type"] == "one_on_one_progress"
+
+                    # Session 2 activates automatically
+                    s2_init_c = ws_chal.receive_json()
+                    assert s2_init_c["type"] == "one_on_one_started"
+                    assert s2_init_c["audience_id"] == aud2.id
+
+                    s2_init_a2 = ws_aud2.receive_json()
+                    assert s2_init_a2["type"] == "one_on_one_started"
+                    assert s2_init_a2["audience_id"] == aud2.id
+
+                    # --- SESSION 2 (Challenger <-> Aud 2) ---
+                    client.post(f"/rooms/{room.id}/one-on-one/{s2.id}/question", json={"user_id": aud2.id, "text": "Q2"})
+                    assert ws_chal.receive_json()["type"] == "one_on_one_question"
+                    assert ws_aud2.receive_json()["type"] == "one_on_one_question"
+
+                    client.post(f"/rooms/{room.id}/one-on-one/{s2.id}/answer", json={"user_id": challenger.id, "text": "A2"})
+                    assert ws_chal.receive_json()["type"] == "one_on_one_answer"
+                    assert ws_aud2.receive_json()["type"] == "one_on_one_answer"
+
+                    client.post(f"/rooms/{room.id}/one-on-one/{s2.id}/vote", json={"user_id": aud2.id, "vote": "yes"})
+                    assert ws_chal.receive_json()["type"] == "one_on_one_completed"
+                    assert ws_aud2.receive_json()["type"] == "one_on_one_completed"
+                    assert ws_chal.receive_json()["type"] == "one_on_one_progress"
+                    assert ws_aud1.receive_json()["type"] == "one_on_one_progress"
+                    assert ws_aud2.receive_json()["type"] == "one_on_one_progress"
 
         # Room enters FINAL_SELECTION
         db.refresh(room)

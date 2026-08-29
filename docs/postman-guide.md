@@ -156,38 +156,38 @@ Register 1 female and 5 males. The 5th male will trigger automatic game room cre
 
 ---
 
-### Step 5: Sequential 1-on-1 Sessions (REST + Private WebSocket)
+### Step 5: Sequential 1-on-1 Sessions (Filtered GameRoom WebSocket)
 
 1. **Check 1-on-1 Sessions List**
    - **Method:** `GET` `{{base_url}}/rooms/{{room_id}}/one-on-one`
    - **Response:** List of 3 sessions. Copy the first session ID into `{{session_id}}`.
 
 2. **Check Current Active Session**
-   - **Method:** `GET` `{{base_url}}/rooms/{{room_id}}/one-on-one/current`
+   - **Method:** `GET` `{{base_url}}/rooms/{{room_id}}/one-on-one/current?user_id={{aud1_id}}`
 
-3. **Open Private 1-on-1 WebSocket in Postman**
-   - Create WebSocket tab: `{{ws_url}}/ws/rooms/{{room_id}}/one-on-one/{{session_id}}/users/{{aud1_id}}`
-   - Click **Connect**.
-   - Immediate message: `{"type": "private_session_state", "state": "active"}`.
+3. **GameRoom WebSocket Remains Active**
+   - Keep the existing GameRoom WebSocket tab open: `{{ws_url}}/ws/rooms/{{room_id}/users/{{aud1_id}}` (and challenger's socket `{{ws_url}}/ws/rooms/{{room_id}/users/{{challenger_id}}`).
+   - Receives: `{"type": "one_on_one_started", "session_id": 1, ...}`.
 
 4. **Audience Submits Private Question**
    - **Method:** `POST` `{{base_url}}/rooms/{{room_id}}/one-on-one/{{session_id}}/question`
    - **Body:** `{"user_id": {{aud1_id}}, "text": "What is your biggest life goal?"}`
-   - *WebSocket receives:* `private_question`
+   - *Active participants receive via GameRoom WS:* `{"type": "one_on_one_question", "question": "..."}`
 
 5. **Challenger Submits Private Answer**
    - **Method:** `POST` `{{base_url}}/rooms/{{room_id}}/one-on-one/{{session_id}}/answer`
    - **Body:** `{"user_id": {{challenger_id}}, "text": "To build a great tech startup."}`
-   - *WebSocket receives:* `private_answer`
+   - *Active participants receive via GameRoom WS:* `{"type": "one_on_one_answer", "answer": "..."}`
 
 6. **Audience Casts Private Vote (YES)**
    - **Method:** `POST` `{{base_url}}/rooms/{{room_id}}/one-on-one/{{session_id}}/vote`
    - **Body:** `{"user_id": {{aud1_id}}, "vote": "yes"}`
-   - *WebSocket receives:* `session_completed` $\rightarrow$ Audience 1 marked `FINALIST`.
+   - *Active participants receive via GameRoom WS:* `one_on_one_completed` $\rightarrow$ Audience 1 marked `FINALIST`.
+   - *Room receives:* `one_on_one_progress`.
 
 7. **Execute Remaining 2 Sessions:**
-   - For Session 2: Submit Q $\rightarrow$ A $\rightarrow$ Vote `no` (Eliminated to queue).
-   - For Session 3: Submit Q $\rightarrow$ A $\rightarrow$ Vote `yes` (Marked `FINALIST`).
+   - For Session 2: Submit Q $\rightarrow$ A $\rightarrow$ Vote `no` (Audience 2 eliminated to queue).
+   - For Session 3: Submit Q $\rightarrow$ A $\rightarrow$ Vote `yes` (Audience 3 marked `FINALIST`).
    - *Result:* 2 finalists survive $\rightarrow$ Room automatically enters `FINAL_SELECTION`!
 
 ---

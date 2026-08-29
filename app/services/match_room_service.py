@@ -183,6 +183,13 @@ class MatchRoomService:
             db.add(contact)
             db.commit()
             db.refresh(contact)
+            logger.info(
+                "Contact submitted for match room %d by user %d (has_whatsapp=%s, has_snapchat=%s)",
+                match_room_id,
+                user_id,
+                bool(w_clean),
+                bool(s_clean),
+            )
 
             partner_id = (
                 match.audience_id

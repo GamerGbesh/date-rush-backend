@@ -7,6 +7,7 @@ source of truth for all persistent state. On server restart, connections
 are lost (expected for a single-process event application).
 """
 
+from collections.abc import Iterable
 import logging
 from collections import defaultdict
 
@@ -16,113 +17,114 @@ logger = logging.getLogger(__name__)
 
 # Type aliases for clarity
 _RoomId = int
-_SessionId = int
 _UserId = int
 
 
 class WebSocketManager:
-    """Manages in-memory WebSocket connections grouped by room and private session."""
+    """Manages in-memory WebSocket connections grouped by game room, match room, and queue."""
 
     def __init__(self) -> None:
-        # { room_id: { user_id: WebSocket } }
-        self._connections: dict[_RoomId, dict[_UserId, WebSocket]] = defaultdict(dict)
-        # { session_id: { user_id: WebSocket } }
-        self._session_connections: dict[_SessionId, dict[_UserId, WebSocket]] = defaultdict(dict)
+        # { room_id: { user_id: set[WebSocket] } }
+        self._connections: dict[_RoomId, dict[_UserId, set[WebSocket]]] = defaultdict(
+            lambda: defaultdict(set)
+        )
         # { match_room_id: { user_id: WebSocket } }
         self._match_room_connections: dict[int, dict[_UserId, WebSocket]] = defaultdict(dict)
         # { user_id: WebSocket }
         self._queue_connections: dict[_UserId, WebSocket] = {}
 
     # -------------------------------------------------------------------------
-    # Public room channels
+    # Game Room channels (Multiplexed Transport)
     # -------------------------------------------------------------------------
 
     def connect(self, room_id: _RoomId, user_id: _UserId, websocket: WebSocket) -> None:
         """Register a new WebSocket connection for a user in a room."""
-        self._connections[room_id][user_id] = websocket
+        self._connections[room_id][user_id].add(websocket)
         logger.info("WS connected  room=%s user=%s", room_id, user_id)
 
-    def disconnect(self, room_id: _RoomId, user_id: _UserId) -> None:
+    def disconnect(
+        self, room_id: _RoomId, user_id: _UserId, websocket: WebSocket | None = None
+    ) -> None:
         """Remove a WebSocket connection. Safe to call even if not connected."""
         room_conns = self._connections.get(room_id)
         if room_conns and user_id in room_conns:
-            del room_conns[user_id]
+            if websocket is not None:
+                room_conns[user_id].discard(websocket)
+            if websocket is None or not room_conns[user_id]:
+                room_conns.pop(user_id, None)
             logger.info("WS disconnected  room=%s user=%s", room_id, user_id)
         # Clean up empty room entries to avoid unbounded memory growth.
         if room_conns is not None and not room_conns:
-            del self._connections[room_id]
+            self._connections.pop(room_id, None)
 
     async def send_to_user(
         self, room_id: _RoomId, user_id: _UserId, message: dict
     ) -> None:
-        """Send a JSON message to a single user in a room."""
+        """Send a JSON message to a single user in a room across all their active connections."""
         room_conns = self._connections.get(room_id, {})
-        ws = room_conns.get(user_id)
-        if ws is not None:
-            await ws.send_json(message)
-        else:
-            logger.warning(
-                "send_to_user: no connection  room=%s user=%s", room_id, user_id
+        user_sockets = list(room_conns.get(user_id, set()))
+        msg_type = message.get("type", "unknown")
+        if user_sockets:
+            logger.debug(
+                "WS send_to_user  room=%s user=%s type=%s socket_count=%d",
+                room_id,
+                user_id,
+                msg_type,
+                len(user_sockets),
             )
+            for ws in user_sockets:
+                try:
+                    await ws.send_json(message)
+                except Exception:
+                    logger.exception(
+                        "send_to_user failed  room=%s user=%s type=%s",
+                        room_id,
+                        user_id,
+                        msg_type,
+                    )
+        else:
+            logger.debug(
+                "send_to_user: no active connection  room=%s user=%s type=%s",
+                room_id,
+                user_id,
+                msg_type,
+            )
+
+    async def send_to_users(
+        self, room_id: _RoomId, user_ids: Iterable[_UserId], message: dict
+    ) -> None:
+        """Send a JSON message only to the specified set/iterable of users in a room."""
+        user_ids_list = list(user_ids)
+        logger.debug(
+            "WS send_to_users  room=%s targets=%s type=%s",
+            room_id,
+            user_ids_list,
+            message.get("type", "unknown"),
+        )
+        for user_id in user_ids_list:
+            await self.send_to_user(room_id, user_id, message)
 
     async def broadcast(self, room_id: _RoomId, message: dict) -> None:
         """Send a JSON message to every connected user in a room."""
         room_conns = self._connections.get(room_id, {})
-        for user_id, ws in list(room_conns.items()):
-            try:
-                await ws.send_json(message)
-            except Exception:
-                logger.exception(
-                    "broadcast failed  room=%s user=%s", room_id, user_id
-                )
-
-    # -------------------------------------------------------------------------
-    # Private 1-on-1 session channels
-    # -------------------------------------------------------------------------
-
-    def connect_session(
-        self, session_id: _SessionId, user_id: _UserId, websocket: WebSocket
-    ) -> None:
-        """Register a new WebSocket connection for a user in a private 1-on-1 session."""
-        self._session_connections[session_id][user_id] = websocket
-        logger.info("Private WS connected  session=%s user=%s", session_id, user_id)
-
-    def disconnect_session(self, session_id: _SessionId, user_id: _UserId) -> None:
-        """Remove a private session WebSocket connection."""
-        session_conns = self._session_connections.get(session_id)
-        if session_conns and user_id in session_conns:
-            del session_conns[user_id]
-            logger.info("Private WS disconnected  session=%s user=%s", session_id, user_id)
-        if session_conns is not None and not session_conns:
-            del self._session_connections[session_id]
-
-    async def send_to_session_user(
-        self, session_id: _SessionId, user_id: _UserId, message: dict
-    ) -> None:
-        """Send a JSON message to a single user in a private session."""
-        session_conns = self._session_connections.get(session_id, {})
-        ws = session_conns.get(user_id)
-        if ws is not None:
-            await ws.send_json(message)
-        else:
-            logger.warning(
-                "send_to_session_user: no connection  session=%s user=%s",
-                session_id,
-                user_id,
-            )
-
-    async def broadcast_session(self, session_id: _SessionId, message: dict) -> None:
-        """Send a JSON message to both participants in a private 1-on-1 session."""
-        session_conns = self._session_connections.get(session_id, {})
-        for user_id, ws in list(session_conns.items()):
-            try:
-                await ws.send_json(message)
-            except Exception:
-                logger.exception(
-                    "session broadcast failed  session=%s user=%s",
-                    session_id,
-                    user_id,
-                )
+        msg_type = message.get("type", "unknown")
+        logger.debug(
+            "WS broadcast  room=%s total_users=%d type=%s",
+            room_id,
+            len(room_conns),
+            msg_type,
+        )
+        for user_id, user_sockets in list(room_conns.items()):
+            for ws in list(user_sockets):
+                try:
+                    await ws.send_json(message)
+                except Exception:
+                    logger.exception(
+                        "broadcast failed  room=%s user=%s type=%s",
+                        room_id,
+                        user_id,
+                        msg_type,
+                    )
 
     # -------------------------------------------------------------------------
     # Private match room channels

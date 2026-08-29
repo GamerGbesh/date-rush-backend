@@ -102,6 +102,48 @@ async def room_websocket_endpoint(
             }
         )
 
+    # If the room is already in ONE_ON_ONE, deliver one-on-one session info
+    if room.state == RoomState.ONE_ON_ONE:
+        from app.enums import OneOnOneSessionState
+        from app.services.one_on_one_service import one_on_one_service
+        active_session = one_on_one_service.get_active_session(db, room.id)
+        total_sessions = db.execute(
+            select(func.count(OneOnOneSession.id)).where(
+                OneOnOneSession.room_id == room.id
+            )
+        ).scalar_one()
+        completed_sessions = db.execute(
+            select(func.count(OneOnOneSession.id)).where(
+                OneOnOneSession.room_id == room.id,
+                OneOnOneSession.state == OneOnOneSessionState.COMPLETED,
+            )
+        ).scalar_one()
+
+        if active_session and user_id in (active_session.challenger_id, active_session.audience_id):
+            await websocket.send_json(
+                {
+                    "type": "one_on_one_started",
+                    "room_id": room.id,
+                    "session_id": active_session.id,
+                    "audience_id": active_session.audience_id,
+                    "challenger_id": active_session.challenger_id,
+                    "sequence": active_session.sequence,
+                    "total": total_sessions,
+                    "state": active_session.state.value if hasattr(active_session.state, "value") else str(active_session.state),
+                    "question": active_session.question,
+                    "answer": active_session.answer,
+                }
+            )
+        else:
+            await websocket.send_json(
+                {
+                    "type": "one_on_one_progress",
+                    "room_id": room.id,
+                    "completed": completed_sessions,
+                    "total": total_sessions,
+                }
+            )
+
     # If the room is in FINAL_SELECTION, deliver final_selection_started
     if room.state == RoomState.FINAL_SELECTION:
         from app.services.match_service import match_service
@@ -129,82 +171,14 @@ async def room_websocket_endpoint(
             # Keep alive and receive any client-sent text
             await websocket.receive_text()
     except WebSocketDisconnect:
-        ws_manager.disconnect(room_id, user_id)
+        ws_manager.disconnect(room_id, user_id, websocket)
         logger.info(
             "WebSocket disconnected cleanly for room %d user %d", room_id, user_id
         )
     except Exception:
-        ws_manager.disconnect(room_id, user_id)
+        ws_manager.disconnect(room_id, user_id, websocket)
         logger.exception(
             "WebSocket exception occurred for room %d user %d", room_id, user_id
-        )
-
-
-@router.websocket("/rooms/{room_id}/one-on-one/{session_id}/users/{user_id}")
-async def private_one_on_one_websocket_endpoint(
-    websocket: WebSocket,
-    room_id: int,
-    session_id: int,
-    user_id: int,
-    db: Session = Depends(get_db),
-) -> None:
-    """
-    Private WebSocket endpoint for 1-on-1 interaction.
-    Strictly restricted to the challenger and the active audience member of this session.
-    """
-    session = db.get(OneOnOneSession, session_id)
-    if not session or session.room_id != room_id:
-        logger.warning(
-            "Private WS rejected: session %d not found for room %d",
-            session_id,
-            room_id,
-        )
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
-
-    # Strictly authorize ONLY the challenger and session audience member
-    if user_id not in (session.challenger_id, session.audience_id):
-        logger.warning(
-            "Private WS rejected: user %d is neither challenger nor audience in session %d",
-            user_id,
-            session_id,
-        )
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-        return
-
-    await websocket.accept()
-    ws_manager.connect_session(session_id, user_id, websocket)
-
-    # Deliver current private session state immediately upon connection
-    initial_payload = {
-        "type": "private_session_state",
-        "session_id": session.id,
-        "state": session.state.value if hasattr(session.state, "value") else str(session.state),
-        "sequence": session.sequence,
-        "audience_id": session.audience_id,
-        "challenger_id": session.challenger_id,
-        "question": session.question,
-        "answer": session.answer,
-        "vote": session.vote.value if session.vote else None,
-    }
-    await websocket.send_json(initial_payload)
-
-    try:
-        while True:
-            await websocket.receive_text()
-    except WebSocketDisconnect:
-        ws_manager.disconnect_session(session_id, user_id)
-        logger.info(
-            "Private WebSocket disconnected cleanly for session %d user %d",
-            session_id,
-            user_id,
-        )
-    except Exception:
-        ws_manager.disconnect_session(session_id, user_id)
-        logger.exception(
-            "Private WebSocket exception for session %d user %d",
-            session_id,
-            user_id,
         )
 
 

@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
@@ -15,12 +16,17 @@ from app.config import settings
 from app.database import init_db
 from app.exceptions import InvalidRoomTransitionError, MatchRoomNotFoundError, RoomNotFoundError
 
+logger = logging.getLogger("app.main")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Create database tables on startup."""
+    """Create database tables on startup and log lifecycle."""
+    logger.info("Starting Date Rush API: Initializing database and services...")
     init_db()
+    logger.info("Date Rush API initialized and ready.")
     yield
+    logger.info("Date Rush API shutting down.")
 
 
 app = FastAPI(

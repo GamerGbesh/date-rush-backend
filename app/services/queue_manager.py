@@ -46,6 +46,7 @@ class QueueManager:
         user.queued_at = datetime.now(timezone.utc)
         db.commit()
         db.refresh(user)
+        logger.info("User %d (%s) placed in queue", user.id, user.gender.value)
 
     def remove(self, db: Session, user: User) -> None:
         """Remove a user from the queue and return them to WAITING."""
@@ -53,6 +54,7 @@ class QueueManager:
         user.queued_at = None
         db.commit()
         db.refresh(user)
+        logger.info("User %d removed from queue -> WAITING", user.id)
 
     def get_size(self, db: Session, gender: Gender) -> int:
         """Return the number of users currently queued for a given gender."""

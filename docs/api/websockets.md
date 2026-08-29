@@ -6,21 +6,15 @@ This document defines the WebSocket communication architecture, connection lifec
 
 ## 1. Overview & Channels
 
-The Date Rush backend exposes three dedicated WebSocket channels:
+The Date Rush backend exposes two dedicated WebSocket channels:
 
-1. **Public Game Room Channel:**
+1. **Game Room Channel (Multiplexed Transport):**
    ```text
    WS /ws/rooms/{room_id}/users/{user_id}
    ```
-   Live public game room events (questions, challenger answers, voting progress, eliminations, 1-on-1 announcements, final selection, and match creation).
+   Single physical WebSocket channel throughout the entire game lifecycle. Carries both public room events (questions, answers, voting progress, eliminations, final selection, match creation) and **private one-on-one session messages** (filtered and routed by the backend strictly to the challenger and the active audience member).
 
-2. **Private One-on-One Session Channel:**
-   ```text
-   WS /ws/rooms/{room_id}/one-on-one/{session_id}/users/{user_id}
-   ```
-   Private, isolated channel restricted strictly to the challenger and the active audience member in that specific session.
-
-3. **Private Match Room Channel:**
+2. **Private Match Room Channel:**
    ```text
    WS /ws/match-rooms/{match_room_id}/users/{user_id}
    ```
@@ -32,20 +26,24 @@ The Date Rush backend exposes three dedicated WebSocket channels:
 
 ### Authorization & Rejection
 - All WebSocket connections require a valid `user_id` in the URL path.
-- The server checks whether the user is an active, authorized member of the requested room or session before accepting the connection.
+- The server checks whether the user is an active, authorized member of the requested room before accepting the connection.
 - If unauthorized, the socket is immediately closed with:
   ```text
   WS Close Code: 1008 (Policy Violation)
   ```
 
 ### Reconnection & State Synchronization
-When a frontend client connects (or reconnects after a network drop or page refresh), the server **immediately pushes the current phase state**. The frontend does not need to wait for a future broadcast event to reconstruct the screen.
+When a frontend client connects (or reconnects after a network drop or page refresh), the server **immediately pushes the current phase state**.
+- If the room is in `QUESTIONING`, `VOTING`, or `FINAL_SELECTION`, the active phase data is pushed immediately.
+- If the room is in `ONE_ON_ONE`, active participants (`challenger` and current `audience_id`) receive `one_on_one_started` containing active session details, while waiting audience members receive `one_on_one_progress`.
 
 ---
 
-## 3. Public Game Room Events Catalog (`/ws/rooms/{room_id}/users/{user_id}`)
+## 3. Game Room Events Catalog (`/ws/rooms/{room_id}/users/{user_id}`)
 
-### 1. `room_state_changed`
+### Public Events (Broadcast to Room)
+
+#### 1. `room_state_changed`
 Sent immediately on connection and whenever the room changes state.
 ```json
 {
@@ -56,7 +54,7 @@ Sent immediately on connection and whenever the room changes state.
 }
 ```
 
-### 2. `question_started`
+#### 2. `question_started`
 Sent when a public question begins.
 ```json
 {
@@ -70,7 +68,7 @@ Sent when a public question begins.
 }
 ```
 
-### 3. `answer_revealed`
+#### 3. `answer_revealed`
 Broadcast when the challenger submits their answer.
 ```json
 {
@@ -82,7 +80,7 @@ Broadcast when the challenger submits their answer.
 }
 ```
 
-### 4. `voting_started`
+#### 4. `voting_started`
 Broadcast when public voting begins after all public questions.
 ```json
 {
@@ -93,7 +91,7 @@ Broadcast when public voting begins after all public questions.
 }
 ```
 
-### 5. `vote_progress`
+#### 5. `vote_progress`
 Broadcast whenever an audience member casts a vote (does not reveal individual choices).
 ```json
 {
@@ -104,7 +102,7 @@ Broadcast whenever an audience member casts a vote (does not reveal individual c
 }
 ```
 
-### 6. `voting_completed`
+#### 6. `voting_completed`
 Broadcast when all audience votes have been cast.
 ```json
 {
@@ -114,7 +112,7 @@ Broadcast when all audience votes have been cast.
 }
 ```
 
-### 7. `participants_eliminated`
+#### 7. `participants_eliminated`
 Broadcast to surviving participants summarizing elimination results.
 ```json
 {
@@ -125,7 +123,7 @@ Broadcast to surviving participants summarizing elimination results.
 }
 ```
 
-### 8. `eliminated`
+#### 8. `eliminated`
 Sent privately to eliminated audience members notifying them of queue re-entry.
 ```json
 {
@@ -135,17 +133,18 @@ Sent privately to eliminated audience members notifying them of queue re-entry.
 }
 ```
 
-### 9. `one_on_one_started`
-Broadcast when the room enters the 1-on-1 phase.
+#### 9. `one_on_one_progress`
+Broadcast to room participants reporting progress of the sequential 1-on-1 sessions.
 ```json
 {
-  "type": "one_on_one_started",
+  "type": "one_on_one_progress",
   "room_id": 4,
-  "total_sessions": 3
+  "completed": 2,
+  "total": 5
 }
 ```
 
-### 10. `final_selection_started`
+#### 10. `final_selection_started`
 Broadcast when multiple finalists survive and the challenger must choose.
 ```json
 {
@@ -158,7 +157,7 @@ Broadcast when multiple finalists survive and the challenger must choose.
 }
 ```
 
-### 11. `final_selection_completed`
+#### 11. `final_selection_completed`
 Broadcast when the challenger submits their final choice.
 ```json
 {
@@ -168,7 +167,7 @@ Broadcast when the challenger submits their final choice.
 }
 ```
 
-### 12. `match_created`
+#### 12. `match_created`
 Broadcast when a match is formed (either via selection or single-survivor shortcut).
 ```json
 {
@@ -181,7 +180,7 @@ Broadcast when a match is formed (either via selection or single-survivor shortc
 }
 ```
 
-### 13. `room_completed`
+#### 13. `room_completed`
 Broadcast when the room lifecycle ends.
 ```json
 {
@@ -192,50 +191,56 @@ Broadcast when the room lifecycle ends.
 
 ---
 
-## 4. Private 1-on-1 Session Events (`/ws/rooms/{room_id}/one-on-one/{session_id}/users/{user_id}`)
+### Private One-on-One Events (Targeted to Active Session Participants)
 
-### 1. `private_session_state`
-Sent immediately on connection to restore session state.
+These events are sent across the same GameRoom WebSocket connection (`/ws/rooms/{room_id}/users/{user_id}`), but the backend filters recipients so only the `challenger` and active `audience_id` receive them.
+
+#### 1. `one_on_one_started`
+Delivered to the challenger and the active audience member when a session begins or on reconnection.
 ```json
 {
-  "type": "private_session_state",
+  "type": "one_on_one_started",
+  "room_id": 4,
   "session_id": 2,
-  "state": "active",
   "sequence": 2,
+  "total": 5,
   "audience_id": 3,
-  "challenger_id": 2,
-  "question": null,
-  "answer": null,
-  "vote": null
+  "challenger_id": 2
 }
 ```
 
-### 2. `private_question`
-Delivered to both participants when the audience member submits their question.
+#### 2. `one_on_one_question`
+Delivered strictly to the active audience member and challenger when the question is submitted.
 ```json
 {
-  "type": "private_question",
+  "type": "one_on_one_question",
+  "room_id": 4,
   "session_id": 2,
-  "text": "What is your favorite weekend activity?"
+  "sequence": 2,
+  "question": "What is your favorite weekend activity?"
 }
 ```
 
-### 3. `private_answer`
-Delivered to both participants when the challenger answers.
+#### 3. `one_on_one_answer`
+Delivered strictly to the active audience member and challenger when the answer is submitted.
 ```json
 {
-  "type": "private_answer",
+  "type": "one_on_one_answer",
+  "room_id": 4,
   "session_id": 2,
-  "text": "Cooking dinner and watching movies."
+  "sequence": 2,
+  "answer": "Cooking dinner and watching movies."
 }
 ```
 
-### 4. `session_completed`
-Delivered to both participants when the private vote is processed.
+#### 4. `one_on_one_completed`
+Delivered strictly to the active audience member and challenger when the private vote is processed.
 ```json
 {
-  "type": "session_completed",
+  "type": "one_on_one_completed",
+  "room_id": 4,
   "session_id": 2,
+  "sequence": 2,
   "result": "accepted"
 }
 ```

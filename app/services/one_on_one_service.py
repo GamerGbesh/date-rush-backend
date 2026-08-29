@@ -100,15 +100,30 @@ class OneOnOneService:
             "Initialized %d one-on-one sessions for room %d", len(sessions), room.id
         )
 
-        # Broadcast start of 1-on-1 phase to public room
+        # Send targeted one_on_one_started to the active participants and public progress to room
         if sessions:
-            await ws_manager.broadcast(
+            first_session = sessions[0]
+            total_count = len(sessions)
+            await ws_manager.send_to_users(
                 room.id,
+                [first_session.challenger_id, first_session.audience_id],
                 {
                     "type": "one_on_one_started",
                     "room_id": room.id,
-                    "sequence": 1,
-                    "total": len(sessions),
+                    "session_id": first_session.id,
+                    "sequence": first_session.sequence,
+                    "total": total_count,
+                    "audience_id": first_session.audience_id,
+                    "challenger_id": first_session.challenger_id,
+                },
+            )
+            await ws_manager.broadcast(
+                room.id,
+                {
+                    "type": "one_on_one_progress",
+                    "room_id": room.id,
+                    "completed": 0,
+                    "total": total_count,
                 },
             )
 
@@ -160,6 +175,7 @@ class OneOnOneService:
     ) -> OneOnOneSession:
         """
         Submit a free-form question from the session audience member.
+        Routes the question strictly to the challenger and the active audience member.
         """
         session = self.get_session(db, session_id)
         if session.room_id != room_id:
@@ -201,12 +217,16 @@ class OneOnOneService:
             "Private question submitted for session %d by user %d", session.id, user_id
         )
 
-        # Broadcast to private session channel only
-        await ws_manager.broadcast_session(
-            session.id,
+        # Send private question strictly to session participants over the GameRoom channel
+        await ws_manager.send_to_users(
+            room_id,
+            [session.challenger_id, session.audience_id],
             {
-                "type": "private_question",
+                "type": "one_on_one_question",
+                "room_id": room_id,
                 "session_id": session.id,
+                "sequence": session.sequence,
+                "question": cleaned_text,
                 "text": cleaned_text,
             },
         )
@@ -223,6 +243,7 @@ class OneOnOneService:
     ) -> OneOnOneSession:
         """
         Submit an answer from the challenger.
+        Routes the answer strictly to the active audience member and challenger.
         """
         session = self.get_session(db, session_id)
         if session.room_id != room_id:
@@ -273,12 +294,16 @@ class OneOnOneService:
             user_id,
         )
 
-        # Broadcast to private session channel only
-        await ws_manager.broadcast_session(
-            session.id,
+        # Send private answer strictly to session participants over the GameRoom channel
+        await ws_manager.send_to_users(
+            room_id,
+            [session.challenger_id, session.audience_id],
             {
-                "type": "private_answer",
+                "type": "one_on_one_answer",
+                "room_id": room_id,
                 "session_id": session.id,
+                "sequence": session.sequence,
+                "answer": cleaned_text,
                 "text": cleaned_text,
             },
         )
@@ -326,6 +351,23 @@ class OneOnOneService:
         session.completed_at = now
         session.state = OneOnOneSessionState.COMPLETED
 
+        logger.info(
+            "Private vote recorded for session %d: %s", session.id, vote_choice.value
+        )
+
+        # Send completion event strictly to session participants
+        await ws_manager.send_to_users(
+            room_id,
+            [session.challenger_id, session.audience_id],
+            {
+                "type": "one_on_one_completed",
+                "room_id": room_id,
+                "session_id": session.id,
+                "sequence": session.sequence,
+                "result": "accepted" if vote_choice == VoteChoice.YES else "rejected",
+            },
+        )
+
         # Handle YES vs NO
         if vote_choice == VoteChoice.NO:
             # Participant is eliminated from room
@@ -342,14 +384,10 @@ class OneOnOneService:
             db.commit()
             db.refresh(session)
 
-            # Notify user and disconnect
-            await ws_manager.send_to_session_user(
-                session.id, session.audience_id, {"type": "eliminated", "room_id": room_id}
-            )
+            # Notify audience member of elimination and disconnect socket
             await ws_manager.send_to_user(
                 room_id, session.audience_id, {"type": "eliminated", "room_id": room_id}
             )
-            ws_manager.disconnect_session(session.id, session.audience_id)
             ws_manager.disconnect(room_id, session.audience_id)
         else:
             # Participant survives 1-on-1 as a FINALIST
@@ -358,20 +396,6 @@ class OneOnOneService:
                 p.status = ParticipantStatus.FINALIST
             db.commit()
             db.refresh(session)
-
-        logger.info(
-            "Private vote recorded for session %d: %s", session.id, vote_choice.value
-        )
-
-        # Broadcast completion to private session channel
-        await ws_manager.broadcast_session(
-            session.id,
-            {
-                "type": "session_completed",
-                "session_id": session.id,
-                "result": "accepted" if vote_choice == VoteChoice.YES else "rejected",
-            },
-        )
 
         # Broadcast progress to public room channel
         total_sessions = db.execute(
@@ -460,29 +484,18 @@ class OneOnOneService:
                     next_session.sequence,
                     room_id,
                 )
-                await ws_manager.broadcast(
+                # Deliver one_on_one_started strictly to the new session participants
+                await ws_manager.send_to_users(
                     room_id,
+                    [next_session.challenger_id, next_session.audience_id],
                     {
                         "type": "one_on_one_started",
                         "room_id": room.id,
                         "session_id": next_session.id,
                         "audience_id": next_session.audience_id,
+                        "challenger_id": next_session.challenger_id,
                         "sequence": next_session.sequence,
                         "total": total_sessions,
-                    },
-                )
-                await ws_manager.broadcast_session(
-                    next_session.id,
-                    {
-                        "type": "private_session_state",
-                        "session_id": next_session.id,
-                        "state": next_session.state.value if hasattr(next_session.state, "value") else str(next_session.state),
-                        "sequence": next_session.sequence,
-                        "audience_id": next_session.audience_id,
-                        "challenger_id": next_session.challenger_id,
-                        "question": next_session.question,
-                        "answer": next_session.answer,
-                        "vote": next_session.vote.value if next_session.vote else None,
                     },
                 )
             else:

@@ -181,19 +181,44 @@ def list_one_on_one_sessions(
 @router.get("/{room_id}/one-on-one/current", response_model=OneOnOneRoomStatusResponse)
 def get_current_one_on_one_session(
     room_id: int,
+    user_id: int | None = None,
     db: Session = Depends(get_db),
 ) -> OneOnOneRoomStatusResponse:
     """
     Retrieve the status of the current active 1-on-1 session and progress counters.
+    If user_id is provided, only participants of the active session see private details.
     """
     sessions = one_on_one_service.get_sessions_for_room(db, room_id)
     active = one_on_one_service.get_active_session(db, room_id)
     completed = sum(1 for s in sessions if s.state.value == "completed")
+
+    active_read = None
+    if active:
+        if user_id is not None and user_id not in (active.challenger_id, active.audience_id):
+            active_read = OneOnOneSessionRead(
+                id=active.id,
+                room_id=active.room_id,
+                audience_id=active.audience_id,
+                challenger_id=active.challenger_id,
+                sequence=active.sequence,
+                state=active.state,
+                question=None,
+                answer=None,
+                vote=None,
+                started_at=active.started_at,
+                answered_at=active.answered_at,
+                voted_at=active.voted_at,
+                completed_at=active.completed_at,
+                created_at=active.created_at,
+            )
+        else:
+            active_read = OneOnOneSessionRead.model_validate(active)
+
     return OneOnOneRoomStatusResponse(
         room_id=room_id,
         total_sessions=len(sessions),
         completed_sessions=completed,
-        active_session=OneOnOneSessionRead.model_validate(active) if active else None,
+        active_session=active_read,
     )
 
 
