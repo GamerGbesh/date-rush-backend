@@ -468,6 +468,124 @@
           }
         }
       ]
+    },
+    {
+      "name": "08 - Admin Question Management",
+      "item": [
+        {
+          "name": "Create Question - Any Target",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"What is your favorite weekend activity?\",\n  \"target_gender\": \"any\",\n  \"active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/questions",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "questions"]
+            }
+          }
+        },
+        {
+          "name": "Create Question - Female Target",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"What makes you feel most appreciated in a relationship?\",\n  \"target_gender\": \"female\",\n  \"active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/questions",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "questions"]
+            }
+          }
+        },
+        {
+          "name": "Create Question - Male Target",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"How do you communicate when you are stressed?\",\n  \"target_gender\": \"male\",\n  \"active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/questions",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "questions"]
+            }
+          }
+        },
+        {
+          "name": "List All Questions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/questions",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "questions"]
+            }
+          }
+        },
+        {
+          "name": "List Active Questions",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/questions?active=true",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "questions"],
+              "query": [{ "key": "active", "value": "true" }]
+            }
+          }
+        },
+        {
+          "name": "Get Question by ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/questions/{{question_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "questions", "{{question_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Update Question",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Updated question text?\",\n  \"active\": true\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/admin/questions/{{question_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "questions", "{{question_id}}"]
+            }
+          }
+        },
+        {
+          "name": "Delete Question",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/admin/questions/{{question_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["admin", "questions", "{{question_id}}"]
+            }
+          }
+        }
+      ]
     }
   ]
 }

@@ -258,3 +258,96 @@ Register 1 female and 5 males. The 5th male will trigger automatic game room cre
 4. **Verify Final Completed Profile**
    - **Method:** `GET` `{{base_url}}/users/me?user_id={{challenger_id}}`
    - **Response:** `200 OK` `{"state": "completed", "match_id": 1, "match_room_id": 1}`.
+
+---
+
+## 5. Admin Question Management in Postman
+
+You can create, inspect, update, and delete questions in the question pool:
+
+### 1. Create a Question (Target: ANY)
+- **Method:** `POST` `{{base_url}}/admin/questions`
+- **Headers:** `Content-Type: application/json`
+- **Body (JSON):**
+  ```json
+  {
+    "text": "What is your favorite weekend activity?",
+    "target_gender": "any",
+    "active": true
+  }
+  ```
+- **Response:** `201 Created`
+  ```json
+  {
+    "id": 13,
+    "text": "What is your favorite weekend activity?",
+    "target_gender": "any",
+    "active": true,
+    "created_at": "2026-08-29T00:45:00Z",
+    "updated_at": null
+  }
+  ```
+
+---
+
+### 2. Create a Question (Target: FEMALE Challenger)
+- **Method:** `POST` `{{base_url}}/admin/questions`
+- **Body (JSON):**
+  ```json
+  {
+    "text": "What makes you feel most appreciated in a relationship?",
+    "target_gender": "female",
+    "active": true
+  }
+  ```
+- **Response:** `201 Created`
+
+---
+
+### 3. Create a Question (Target: MALE Challenger)
+- **Method:** `POST` `{{base_url}}/admin/questions`
+- **Body (JSON):**
+  ```json
+  {
+    "text": "How do you communicate when you are stressed?",
+    "target_gender": "male",
+    "active": true
+  }
+  ```
+- **Response:** `201 Created`
+
+---
+
+### 4. List All Questions
+- **Method:** `GET` `{{base_url}}/admin/questions`
+- **Response:** `200 OK` (Array of all question objects)
+
+### 5. List Only Active Questions
+- **Method:** `GET` `{{base_url}}/admin/questions?active=true`
+- **Response:** `200 OK`
+
+---
+
+### 6. Get Question by ID
+- **Method:** `GET` `{{base_url}}/admin/questions/{question_id}`
+- **Response:** `200 OK`
+
+---
+
+### 7. Update Question (Text, Target, or Active Status)
+- **Method:** `PATCH` `{{base_url}}/admin/questions/{question_id}`
+- **Body (JSON):**
+  ```json
+  {
+    "text": "What is your ideal first date?",
+    "active": true
+  }
+  ```
+- **Response:** `200 OK`
+
+---
+
+### 8. Delete a Question
+- **Method:** `DELETE` `{{base_url}}/admin/questions/{question_id}`
+- **Response:** `204 No Content`
+
