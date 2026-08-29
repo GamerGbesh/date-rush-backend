@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers, used by Alembic.
@@ -17,9 +18,23 @@ down_revision: Union[str, Sequence[str], None] = 'c83a1b7e4112'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
+questionphase_enum = postgresql.ENUM('PUBLIC', 'PRIVATE', name='questionphase', create_type=False)
+
 
 def upgrade() -> None:
     """Upgrade schema."""
+    context = op.get_context()
+    is_postgres = context.dialect.name == 'postgresql'
+    bind = op.get_bind()
+
+    if is_postgres:
+        if bind is not None:
+            postgresql.ENUM('PUBLIC', 'PRIVATE', name='questionphase').create(bind, checkfirst=True)
+        else:
+            op.execute("CREATE TYPE questionphase AS ENUM ('PUBLIC', 'PRIVATE')")
+
+    phase_col = questionphase_enum if is_postgres else sa.Enum('PUBLIC', 'PRIVATE', name='questionphase')
+
     # 1. Create room_questions table
     op.create_table(
         'room_questions',
@@ -27,11 +42,7 @@ def upgrade() -> None:
         sa.Column('room_id', sa.Integer(), nullable=False),
         sa.Column('question_id', sa.Integer(), nullable=False),
         sa.Column('position', sa.Integer(), nullable=False),
-        sa.Column(
-            'phase',
-            sa.Enum('PUBLIC', 'PRIVATE', name='questionphase'),
-            nullable=False,
-        ),
+        sa.Column('phase', phase_col, nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(['question_id'], ['questions.id']),
         sa.ForeignKeyConstraint(['room_id'], ['rooms.id']),
@@ -64,3 +75,11 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_room_questions_room_id'), table_name='room_questions')
     op.drop_index(op.f('ix_room_questions_id'), table_name='room_questions')
     op.drop_table('room_questions')
+
+    context = op.get_context()
+    if context.dialect.name == 'postgresql':
+        bind = op.get_bind()
+        if bind is not None:
+            postgresql.ENUM(name='questionphase').drop(bind, checkfirst=True)
+        else:
+            op.execute("DROP TYPE IF EXISTS questionphase")

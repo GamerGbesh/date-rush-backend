@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers, used by Alembic.
@@ -17,16 +18,34 @@ down_revision: Union[str, Sequence[str], None] = 'a39c5d012345'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
+matchroomstate_enum = postgresql.ENUM(
+    'WAITING_FOR_CONTACTS', 'CONTACTS_EXCHANGED', 'COMPLETED', name='matchroomstate', create_type=False
+)
+
 
 def upgrade() -> None:
     """Upgrade schema."""
+    context = op.get_context()
+    is_postgres = context.dialect.name == 'postgresql'
+    bind = op.get_bind()
+
+    if is_postgres:
+        if bind is not None:
+            postgresql.ENUM('WAITING_FOR_CONTACTS', 'CONTACTS_EXCHANGED', 'COMPLETED', name='matchroomstate').create(bind, checkfirst=True)
+        else:
+            op.execute("CREATE TYPE matchroomstate AS ENUM ('WAITING_FOR_CONTACTS', 'CONTACTS_EXCHANGED', 'COMPLETED')")
+
+    state_col = matchroomstate_enum if is_postgres else sa.Enum(
+        'WAITING_FOR_CONTACTS', 'CONTACTS_EXCHANGED', 'COMPLETED', name='matchroomstate'
+    )
+
     op.create_table(
         'match_rooms',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('match_id', sa.Integer(), nullable=False),
         sa.Column(
             'state',
-            sa.Enum('WAITING_FOR_CONTACTS', 'CONTACTS_EXCHANGED', 'COMPLETED', name='matchroomstate'),
+            state_col,
             nullable=False,
             server_default='WAITING_FOR_CONTACTS',
         ),
@@ -71,3 +90,11 @@ def downgrade() -> None:
         batch_op.drop_index(batch_op.f('ix_match_rooms_match_id'))
         batch_op.drop_index(batch_op.f('ix_match_rooms_id'))
     op.drop_table('match_rooms')
+
+    context = op.get_context()
+    if context.dialect.name == 'postgresql':
+        bind = op.get_bind()
+        if bind is not None:
+            postgresql.ENUM(name='matchroomstate').drop(bind, checkfirst=True)
+        else:
+            op.execute("DROP TYPE IF EXISTS matchroomstate")

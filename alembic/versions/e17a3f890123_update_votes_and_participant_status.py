@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers, used by Alembic.
@@ -17,15 +18,33 @@ down_revision: Union[str, Sequence[str], None] = 'd94b2a8e3123'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
+participantstatus_enum = postgresql.ENUM(
+    'ACTIVE', 'ELIMINATED', 'FINALIST', 'SELECTED', name='participantstatus', create_type=False
+)
+
 
 def upgrade() -> None:
     """Upgrade schema."""
+    context = op.get_context()
+    is_postgres = context.dialect.name == 'postgresql'
+    bind = op.get_bind()
+
+    if is_postgres:
+        if bind is not None:
+            postgresql.ENUM('ACTIVE', 'ELIMINATED', 'FINALIST', 'SELECTED', name='participantstatus').create(bind, checkfirst=True)
+        else:
+            op.execute("CREATE TYPE participantstatus AS ENUM ('ACTIVE', 'ELIMINATED', 'FINALIST', 'SELECTED')")
+
+    status_col = participantstatus_enum if is_postgres else sa.Enum(
+        'ACTIVE', 'ELIMINATED', 'FINALIST', 'SELECTED', name='participantstatus'
+    )
+
     # 1. Add status column to room_participants
     with op.batch_alter_table('room_participants', schema=None) as batch_op:
         batch_op.add_column(
             sa.Column(
                 'status',
-                sa.Enum('ACTIVE', 'ELIMINATED', 'FINALIST', 'SELECTED', name='participantstatus'),
+                status_col,
                 nullable=False,
                 server_default='ACTIVE',
             )
@@ -49,3 +68,11 @@ def downgrade() -> None:
 
     with op.batch_alter_table('room_participants', schema=None) as batch_op:
         batch_op.drop_column('status')
+
+    context = op.get_context()
+    if context.dialect.name == 'postgresql':
+        bind = op.get_bind()
+        if bind is not None:
+            postgresql.ENUM(name='participantstatus').drop(bind, checkfirst=True)
+        else:
+            op.execute("DROP TYPE IF EXISTS participantstatus")

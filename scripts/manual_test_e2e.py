@@ -24,7 +24,7 @@ def error(msg: str):
 
 
 def run_manual_tests():
-    with httpx.Client(base_url=BASE_URL, timeout=10.0) as client:
+    with httpx.Client(base_url=BASE_URL, timeout=120.0) as client:
         # --- Step 1: Health Check ---
         log("STEP 1", "Checking server health...")
         resp = client.get("/health")
@@ -73,7 +73,8 @@ def run_manual_tests():
         # Check room details
         resp_room = client.get(f"/rooms/{room_id}")
         room_data = resp_room.json()
-        success(f"Room #{room_id} has {len(room_data['participants'])} active participants in state '{room_data['room']['state']}'.")
+        active_aud_ids = [p["user_id"] for p in room_data["participants"] if p["role"] == "audience"]
+        success(f"Room #{room_id} has {len(room_data['participants'])} active participants (audience IDs: {active_aud_ids}) in state '{room_data['room']['state']}'.")
 
         # --- Step 5: Advance Room to QUESTIONING ---
         log("STEP 5", "Transitioning room READY -> INTRO -> QUESTIONING...")
@@ -109,21 +110,21 @@ def run_manual_tests():
 
         # --- Step 7: Public Voting & Elimination ---
         log("STEP 7", "Audience members casting public votes (3 YES, 2 NO)...")
-        # 3 Vote YES (Kofi, Yaw, Kwame)
+        # 3 Vote YES
         for idx in range(3):
-            m_id = male_ids[idx]
+            m_id = active_aud_ids[idx]
             resp_v = client.post(f"/rooms/{room_id}/vote", json={"user_id": m_id, "vote": "yes"})
             if resp_v.status_code != 201:
                 error(f"Failed to vote YES for user {m_id}: {resp_v.text}")
-            success(f"Audience #{m_id} ({male_names[idx]}) voted YES.")
+            success(f"Audience #{m_id} voted YES.")
 
-        # 2 Vote NO (Kojo, Kwabena)
+        # 2 Vote NO
         for idx in range(3, 5):
-            m_id = male_ids[idx]
+            m_id = active_aud_ids[idx]
             resp_v = client.post(f"/rooms/{room_id}/vote", json={"user_id": m_id, "vote": "no"})
             if resp_v.status_code != 201:
                 error(f"Failed to vote NO for user {m_id}: {resp_v.text}")
-            success(f"Audience #{m_id} ({male_names[idx]}) voted NO.")
+            success(f"Audience #{m_id} voted NO.")
 
         # Room automatically enters ONE_ON_ONE with 3 survivors!
         resp_room = client.get(f"/rooms/{room_id}")
@@ -137,26 +138,26 @@ def run_manual_tests():
         sessions = resp_ooo.json()
         success(f"Found {len(sessions)} sequential 1-on-1 sessions.")
 
-        # Session 1: Kofi (Audience 0) -> Asks Q -> Challenger Answers -> Kofi votes YES (Finalist)
+        # Session 1: Aud 0 -> Asks Q -> Challenger Answers -> Votes YES (Finalist)
         s1 = sessions[0]
-        client.post(f"/rooms/{room_id}/one-on-one/{s1['id']}/question", json={"user_id": male_ids[0], "text": "What makes you laugh the most?"})
+        client.post(f"/rooms/{room_id}/one-on-one/{s1['id']}/question", json={"user_id": s1['audience_id'], "text": "What makes you laugh the most?"})
         client.post(f"/rooms/{room_id}/one-on-one/{s1['id']}/answer", json={"user_id": female_id, "text": "Witty dry humor and silly situational jokes!"})
-        client.post(f"/rooms/{room_id}/one-on-one/{s1['id']}/vote", json={"user_id": male_ids[0], "vote": "yes"})
-        success(f"Session 1 ({male_names[0]}): Question, Answer, and YES vote submitted -> Marked FINALIST.")
+        client.post(f"/rooms/{room_id}/one-on-one/{s1['id']}/vote", json={"user_id": s1['audience_id'], "vote": "yes"})
+        success(f"Session 1 (Aud #{s1['audience_id']}): Question, Answer, and YES vote submitted -> Marked FINALIST.")
 
-        # Session 2: Yaw (Audience 1) -> Asks Q -> Challenger Answers -> Yaw votes NO (Eliminated)
+        # Session 2: Aud 1 -> Asks Q -> Challenger Answers -> Votes NO (Eliminated)
         s2 = sessions[1]
-        client.post(f"/rooms/{room_id}/one-on-one/{s2['id']}/question", json={"user_id": male_ids[1], "text": "Are you an early bird or night owl?"})
+        client.post(f"/rooms/{room_id}/one-on-one/{s2['id']}/question", json={"user_id": s2['audience_id'], "text": "Are you an early bird or night owl?"})
         client.post(f"/rooms/{room_id}/one-on-one/{s2['id']}/answer", json={"user_id": female_id, "text": "Definitely a night owl."})
-        client.post(f"/rooms/{room_id}/one-on-one/{s2['id']}/vote", json={"user_id": male_ids[1], "vote": "no"})
-        success(f"Session 2 ({male_names[1]}): Question, Answer, and NO vote submitted -> Eliminated to queue.")
+        client.post(f"/rooms/{room_id}/one-on-one/{s2['id']}/vote", json={"user_id": s2['audience_id'], "vote": "no"})
+        success(f"Session 2 (Aud #{s2['audience_id']}): Question, Answer, and NO vote submitted -> Eliminated to queue.")
 
-        # Session 3: Kwame (Audience 2) -> Asks Q -> Challenger Answers -> Kwame votes YES (Finalist)
+        # Session 3: Aud 2 -> Asks Q -> Challenger Answers -> Votes YES (Finalist)
         s3 = sessions[2]
-        client.post(f"/rooms/{room_id}/one-on-one/{s3['id']}/question", json={"user_id": male_ids[2], "text": "What is your dream vacation?"})
+        client.post(f"/rooms/{room_id}/one-on-one/{s3['id']}/question", json={"user_id": s3['audience_id'], "text": "What is your dream vacation?"})
         client.post(f"/rooms/{room_id}/one-on-one/{s3['id']}/answer", json={"user_id": female_id, "text": "A road trip across the Mediterranean coast."})
-        client.post(f"/rooms/{room_id}/one-on-one/{s3['id']}/vote", json={"user_id": male_ids[2], "vote": "yes"})
-        success(f"Session 3 ({male_names[2]}): Question, Answer, and YES vote submitted -> Marked FINALIST.")
+        client.post(f"/rooms/{room_id}/one-on-one/{s3['id']}/vote", json={"user_id": s3['audience_id'], "vote": "yes"})
+        success(f"Session 3 (Aud #{s3['audience_id']}): Question, Answer, and YES vote submitted -> Marked FINALIST.")
 
         # Room automatically transitions to FINAL_SELECTION
         resp_room = client.get(f"/rooms/{room_id}")
@@ -170,8 +171,9 @@ def run_manual_tests():
         candidates = resp_fs.json()["candidates"]
         success(f"Candidates available to Challenger: {[c['name'] for c in candidates]}")
 
-        # Challenger selects Kwame (Audience 2)
-        chosen_id = male_ids[2]
+        # Challenger selects candidate 0
+        chosen_id = candidates[0]["id"]
+        chosen_name = candidates[0]["name"]
         resp_select = client.post(
             f"/rooms/{room_id}/final-selection",
             json={"user_id": female_id, "candidate_id": chosen_id},
@@ -180,7 +182,7 @@ def run_manual_tests():
             error(f"Failed to submit final selection: {resp_select.text}")
         match_info = resp_select.json()
         match_id = match_info["id"]
-        success(f"Challenger selected Kwame! Match #{match_id} created.")
+        success(f"Challenger selected {chosen_name} (#{chosen_id})! Match #{match_id} created.")
 
         # --- Step 10: Match & Match Room Details ---
         log("STEP 10", "Fetching Match details and MatchRoom status...")

@@ -28,8 +28,9 @@ from app.database import Base
 config = context.config
 
 # Set the SQLAlchemy URL from our application settings so it stays in sync
-# with DATABASE_URL in the environment / .env file.
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# with DATABASE_URL in the environment / .env file, unless already set.
+if not config.get_main_option("sqlalchemy.url") or config.get_main_option("sqlalchemy.url") in ("", "driver://user:pass@localhost/dbname"):
+    config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 
 # Interpret the config file for Python logging if present.
 if config.config_file_name is not None:
@@ -49,12 +50,13 @@ def run_migrations_offline() -> None:
     Calls to context.execute() emit SQL to the script output.
     """
     url = config.get_main_option("sqlalchemy.url")
+    is_sqlite = url.startswith("sqlite") if url else False
     context.configure(
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        render_as_batch=True,  # required for SQLite ALTER TABLE support
+        render_as_batch=is_sqlite,  # required for SQLite ALTER TABLE support
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -74,10 +76,11 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
+        is_sqlite = connection.dialect.name == "sqlite"
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
-            render_as_batch=True,  # required for SQLite ALTER TABLE support
+            render_as_batch=is_sqlite,  # required for SQLite ALTER TABLE support
         )
         with context.begin_transaction():
             context.run_migrations()

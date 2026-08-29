@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers, used by Alembic.
@@ -17,9 +18,34 @@ down_revision: Union[str, Sequence[str], None] = 'e17a3f890123'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
+oneononesessionstate_enum = postgresql.ENUM(
+    'PENDING', 'ACTIVE', 'ANSWERED', 'VOTING', 'ACCEPTED', 'REJECTED', 'COMPLETED',
+    name='oneononesessionstate',
+    create_type=False,
+)
+votechoice_enum = postgresql.ENUM('YES', 'NO', name='votechoice', create_type=False)
+
 
 def upgrade() -> None:
     """Upgrade schema."""
+    context = op.get_context()
+    is_postgres = context.dialect.name == 'postgresql'
+    bind = op.get_bind()
+
+    if is_postgres:
+        if bind is not None:
+            postgresql.ENUM('PENDING', 'ACTIVE', 'ANSWERED', 'VOTING', 'ACCEPTED', 'REJECTED', 'COMPLETED', name='oneononesessionstate').create(bind, checkfirst=True)
+            postgresql.ENUM('YES', 'NO', name='votechoice').create(bind, checkfirst=True)
+        else:
+            op.execute("CREATE TYPE oneononesessionstate AS ENUM ('PENDING', 'ACTIVE', 'ANSWERED', 'VOTING', 'ACCEPTED', 'REJECTED', 'COMPLETED')")
+            op.execute("CREATE TYPE votechoice AS ENUM ('YES', 'NO')")
+
+    state_col = oneononesessionstate_enum if is_postgres else sa.Enum(
+        'PENDING', 'ACTIVE', 'ANSWERED', 'VOTING', 'ACCEPTED', 'REJECTED', 'COMPLETED',
+        name='oneononesessionstate',
+    )
+    vote_col = votechoice_enum if is_postgres else sa.Enum('YES', 'NO', name='votechoice')
+
     op.create_table(
         'one_on_one_sessions',
         sa.Column('id', sa.Integer(), nullable=False, primary_key=True),
@@ -29,16 +55,7 @@ def upgrade() -> None:
         sa.Column('sequence', sa.Integer(), nullable=False),
         sa.Column(
             'state',
-            sa.Enum(
-                'PENDING',
-                'ACTIVE',
-                'ANSWERED',
-                'VOTING',
-                'ACCEPTED',
-                'REJECTED',
-                'COMPLETED',
-                name='oneononesessionstate',
-            ),
+            state_col,
             nullable=False,
             server_default='PENDING',
         ),
@@ -46,7 +63,7 @@ def upgrade() -> None:
         sa.Column('answer', sa.String(length=1000), nullable=True),
         sa.Column(
             'vote',
-            sa.Enum('YES', 'NO', name='votechoice'),
+            vote_col,
             nullable=True,
         ),
         sa.Column('started_at', sa.DateTime(timezone=True), nullable=True),
@@ -71,3 +88,13 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_one_on_one_sessions_room_id'), table_name='one_on_one_sessions')
     op.drop_index(op.f('ix_one_on_one_sessions_id'), table_name='one_on_one_sessions')
     op.drop_table('one_on_one_sessions')
+
+    context = op.get_context()
+    if context.dialect.name == 'postgresql':
+        bind = op.get_bind()
+        if bind is not None:
+            postgresql.ENUM(name='votechoice').drop(bind, checkfirst=True)
+            postgresql.ENUM(name='oneononesessionstate').drop(bind, checkfirst=True)
+        else:
+            op.execute("DROP TYPE IF EXISTS votechoice")
+            op.execute("DROP TYPE IF EXISTS oneononesessionstate")

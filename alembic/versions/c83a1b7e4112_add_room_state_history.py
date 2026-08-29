@@ -9,6 +9,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 # revision identifiers, used by Alembic.
@@ -17,45 +18,29 @@ down_revision: Union[str, Sequence[str], None] = '0d90af715a91'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
+roomstate_enum = postgresql.ENUM(
+    'WAITING', 'READY', 'INTRO', 'QUESTIONING', 'VOTING', 'ELIMINATION', 'FINAL', 'MATCHED', 'COMPLETED',
+    name='roomstate',
+    create_type=False,
+)
+
 
 def upgrade() -> None:
     """Upgrade schema."""
+    bind = op.get_bind()
+    is_postgres = bind.dialect.name == 'postgresql'
+
+    roomstate_col = roomstate_enum if is_postgres else sa.Enum(
+        'WAITING', 'READY', 'INTRO', 'QUESTIONING', 'VOTING', 'ELIMINATION', 'FINAL', 'MATCHED', 'COMPLETED',
+        name='roomstate',
+    )
+
     op.create_table(
         'room_state_history',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('room_id', sa.Integer(), nullable=False),
-        sa.Column(
-            'from_state',
-            sa.Enum(
-                'WAITING',
-                'READY',
-                'INTRO',
-                'QUESTIONING',
-                'VOTING',
-                'ELIMINATION',
-                'FINAL',
-                'MATCHED',
-                'COMPLETED',
-                name='roomstate',
-            ),
-            nullable=False,
-        ),
-        sa.Column(
-            'to_state',
-            sa.Enum(
-                'WAITING',
-                'READY',
-                'INTRO',
-                'QUESTIONING',
-                'VOTING',
-                'ELIMINATION',
-                'FINAL',
-                'MATCHED',
-                'COMPLETED',
-                name='roomstate',
-            ),
-            nullable=False,
-        ),
+        sa.Column('from_state', roomstate_col, nullable=False),
+        sa.Column('to_state', roomstate_col, nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(['room_id'], ['rooms.id']),
         sa.PrimaryKeyConstraint('id'),
