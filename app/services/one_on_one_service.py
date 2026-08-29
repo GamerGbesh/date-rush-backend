@@ -534,6 +534,7 @@ class OneOnOneService:
                 "room_id": room_id,
                 "session_id": session.id,
                 "sequence": session.sequence,
+                "audience_id": session.audience_id,
                 "result": "accepted" if vote_choice == VoteChoice.YES else "rejected",
             },
         )
