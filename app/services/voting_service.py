@@ -32,6 +32,8 @@ from app.schemas.vote import VotingStatusResponse
 from app.services.room_state_service import room_state_service
 from app.services.websocket_manager import ws_manager
 
+from app.services.timer_service import timer_service
+
 logger = logging.getLogger(__name__)
 
 # Lock to prevent race conditions during vote finalization across async tasks / threads
@@ -47,39 +49,17 @@ def _get_room_lock(room_id: int) -> asyncio.Lock:
 class VotingService:
     """Manages public voting lifecycle and elimination processing."""
 
-    def __init__(self) -> None:
-        self._timers: dict[int, asyncio.Task] = {}
-
     def start_voting_timer(
         self,
         room_id: int,
         round_number: int,
         duration_seconds: float | None = None,
     ) -> None:
-        """Start a background countdown timer to auto-finalize voting when time runs out."""
-        self.cancel_voting_timer(room_id)
+        """Start a background countdown timer via timer_service to auto-finalize voting."""
         duration = duration_seconds if duration_seconds is not None else float(settings.VOTING_TIMEOUT_SECONDS)
-        self._timers[room_id] = asyncio.create_task(
-            self._run_voting_timer(room_id, round_number, duration)
-        )
 
-    def cancel_voting_timer(self, room_id: int) -> None:
-        """Cancel any pending voting timer for this room."""
-        task = self._timers.pop(room_id, None)
-        if task and not task.done():
-            task.cancel()
-
-    async def _run_voting_timer(
-        self,
-        room_id: int,
-        round_number: int,
-        duration_seconds: float,
-    ) -> None:
-        """Wait for duration and trigger finalization if room is still in VOTING state for round."""
-        try:
-            await asyncio.sleep(duration_seconds)
+        async def _on_timeout():
             from app.database import SessionLocal
-
             with SessionLocal() as db:
                 room = db.get(Room, room_id)
                 if room and room.state == RoomState.VOTING and room.current_round == round_number:
@@ -89,16 +69,18 @@ class VotingService:
                         round_number,
                     )
                     await self.finalize_voting(db, room_id)
-        except asyncio.CancelledError:
-            pass
-        except Exception:
-            logger.exception(
-                "Error in voting timer for room %d (round=%d)", room_id, round_number
-            )
-        finally:
-            current_task = asyncio.current_task()
-            if self._timers.get(room_id) == current_task:
-                self._timers.pop(room_id, None)
+
+        timer_service.start_timer(
+            room_id=room_id,
+            timer_type="voting",
+            duration_seconds=duration,
+            on_timeout=_on_timeout,
+            round=round_number,
+        )
+
+    def cancel_voting_timer(self, room_id: int) -> None:
+        """Cancel any pending voting timer for this room."""
+        timer_service.cancel_timer(room_id, "voting")
 
     def get_voting_status(
         self, db: Session, room_id: int, user_id: int | None = None

@@ -33,6 +33,7 @@ from app.models.one_on_one_session import OneOnOneSession
 from app.models.room import Room, RoomParticipant
 from app.models.user import User
 from app.services.room_state_service import room_state_service
+from app.services.timer_service import timer_service
 from app.services.websocket_manager import ws_manager
 
 logger = logging.getLogger(__name__)
@@ -48,7 +49,149 @@ def _get_room_lock(room_id: int) -> asyncio.Lock:
 
 
 class OneOnOneService:
-    """Service handling sequential one-on-one session lifecycle."""
+    """Service handling sequential one-on-one session lifecycle with phase timers."""
+
+    def start_question_timer(
+        self, room_id: int, session_id: int, duration_seconds: float | None = None
+    ) -> None:
+        """Start countdown for audience member to submit private question."""
+        duration = (
+            duration_seconds
+            if duration_seconds is not None
+            else float(settings.ONE_ON_ONE_QUESTION_TIMEOUT_SECONDS)
+        )
+
+        async def _on_timeout():
+            await self.handle_question_timeout(room_id, session_id)
+
+        timer_service.start_timer(
+            room_id=room_id,
+            timer_type="one_on_one_question",
+            duration_seconds=duration,
+            on_timeout=_on_timeout,
+            session_id=session_id,
+        )
+
+    def start_answer_timer(
+        self, room_id: int, session_id: int, duration_seconds: float | None = None
+    ) -> None:
+        """Start countdown for challenger to answer private question."""
+        duration = (
+            duration_seconds
+            if duration_seconds is not None
+            else float(settings.ONE_ON_ONE_ANSWER_TIMEOUT_SECONDS)
+        )
+
+        async def _on_timeout():
+            await self.handle_answer_timeout(room_id, session_id)
+
+        timer_service.start_timer(
+            room_id=room_id,
+            timer_type="one_on_one_answer",
+            duration_seconds=duration,
+            on_timeout=_on_timeout,
+            session_id=session_id,
+        )
+
+    def start_vote_timer(
+        self, room_id: int, session_id: int, duration_seconds: float | None = None
+    ) -> None:
+        """Start countdown for audience member to submit private vote."""
+        duration = (
+            duration_seconds
+            if duration_seconds is not None
+            else float(settings.ONE_ON_ONE_VOTE_TIMEOUT_SECONDS)
+        )
+
+        async def _on_timeout():
+            await self.handle_vote_timeout(room_id, session_id)
+
+        timer_service.start_timer(
+            room_id=room_id,
+            timer_type="one_on_one_vote",
+            duration_seconds=duration,
+            on_timeout=_on_timeout,
+            session_id=session_id,
+        )
+
+    def cancel_session_timer(self, room_id: int) -> None:
+        """Cancel active timer for this room."""
+        timer_service.cancel_timer(room_id)
+
+    async def handle_question_timeout(self, room_id: int, session_id: int) -> None:
+        """Audience member failed to ask private question in time -> eliminate and advance."""
+        from app.database import SessionLocal
+        with SessionLocal() as db:
+            session = db.get(OneOnOneSession, session_id)
+            if not session or session.state != OneOnOneSessionState.ACTIVE or session.question is not None:
+                return
+
+            logger.info("1-on-1 question timeout for session %d (audience=%d)", session.id, session.audience_id)
+            now = datetime.now(timezone.utc)
+            session.state = OneOnOneSessionState.COMPLETED
+            session.completed_at = now
+
+            p = db.get(RoomParticipant, (session.room_id, session.audience_id))
+            if p:
+                p.status = ParticipantStatus.ELIMINATED
+                p.left_at = now
+
+            user = db.get(User, session.audience_id)
+            if user:
+                user.state = UserState.QUEUED
+                user.queued_at = now
+
+            db.commit()
+
+            # Notify audience member of elimination
+            await ws_manager.send_to_user(
+                room_id, session.audience_id, {"type": "eliminated", "room_id": room_id}
+            )
+            ws_manager.disconnect(room_id, session.audience_id)
+
+            await self.activate_next_session(db, room_id)
+
+    async def handle_answer_timeout(self, room_id: int, session_id: int) -> None:
+        """Challenger failed to answer private question in time -> auto-fill '[No Response]' and begin voting."""
+        from app.database import SessionLocal
+        with SessionLocal() as db:
+            session = db.get(OneOnOneSession, session_id)
+            if not session or session.answer is not None:
+                return
+
+            logger.info("1-on-1 answer timeout for session %d -> auto-filling '[No Response]'", session.id)
+            session.answer = "[No Response]"
+            session.answered_at = datetime.now(timezone.utc)
+            session.state = OneOnOneSessionState.VOTING
+            db.commit()
+            db.refresh(session)
+
+            await ws_manager.send_to_users(
+                room_id,
+                [session.challenger_id, session.audience_id],
+                {
+                    "type": "one_on_one_answer",
+                    "room_id": room_id,
+                    "session_id": session.id,
+                    "sequence": session.sequence,
+                    "answer": "[No Response]",
+                    "text": "[No Response]",
+                },
+            )
+
+            # Start voting timer
+            self.start_vote_timer(room_id, session.id)
+
+    async def handle_vote_timeout(self, room_id: int, session_id: int) -> None:
+        """Audience member failed to vote in time -> auto-submit NO vote."""
+        from app.database import SessionLocal
+        with SessionLocal() as db:
+            session = db.get(OneOnOneSession, session_id)
+            if not session or session.state != OneOnOneSessionState.VOTING or session.vote is not None:
+                return
+
+            logger.info("1-on-1 vote timeout for session %d -> auto-submitting NO vote", session.id)
+            await self.submit_vote(db, room_id, session.id, session.audience_id, VoteChoice.NO)
 
     async def initialize_sessions_for_room(
         self, db: Session, room: Room
@@ -126,6 +269,8 @@ class OneOnOneService:
                     "total": total_count,
                 },
             )
+            # Start timer for audience member to ask the private question
+            self.start_question_timer(room.id, first_session.id)
 
         return sessions
 
@@ -217,6 +362,10 @@ class OneOnOneService:
             "Private question submitted for session %d by user %d", session.id, user_id
         )
 
+        # Cancel question timer and start challenger answer timer
+        self.cancel_session_timer(room_id)
+        self.start_answer_timer(room_id, session.id)
+
         # Send private question strictly to session participants over the GameRoom channel
         await ws_manager.send_to_users(
             room_id,
@@ -294,6 +443,10 @@ class OneOnOneService:
             user_id,
         )
 
+        # Cancel answer timer and start audience private vote timer
+        self.cancel_session_timer(room_id)
+        self.start_vote_timer(room_id, session.id)
+
         # Send private answer strictly to session participants over the GameRoom channel
         await ws_manager.send_to_users(
             room_id,
@@ -344,6 +497,9 @@ class OneOnOneService:
 
         if session.vote is not None:
             raise DuplicateSessionVoteError(session_id=session.id)
+
+        # Cancel voting timer
+        self.cancel_session_timer(room_id)
 
         now = datetime.now(timezone.utc)
         session.vote = vote_choice
@@ -498,8 +654,11 @@ class OneOnOneService:
                         "total": total_sessions,
                     },
                 )
+                # Start question timer for the newly activated session
+                self.start_question_timer(room_id, next_session.id)
             else:
                 # All sessions completed!
+                self.cancel_session_timer(room_id)
                 finalists = [
                     p
                     for p in room.participants

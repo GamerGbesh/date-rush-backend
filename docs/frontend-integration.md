@@ -189,6 +189,7 @@ If the user loses internet connection or refreshes the page at any phase:
 | :--- | :--- |
 | **Global State** | `GET /users/me?user_id={user_id}` |
 | **Public Room** | `GET /rooms/{room_id}` |
+| **Room Timer** | `GET /rooms/{room_id}/timer` (See [Frontend Timer Guide](./frontend-timer-guide.md)) |
 | **Public Voting** | `GET /rooms/{room_id}/voting?user_id={user_id}` |
 | **1-on-1 Sessions** | `GET /rooms/{room_id}/one-on-one` |
 | **Final Selection** | `GET /rooms/{room_id}/final-selection?user_id={user_id}` |

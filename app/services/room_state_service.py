@@ -109,15 +109,25 @@ class RoomStateService:
         }
         await ws_manager.broadcast(room.id, event_payload)
 
-        # If leaving VOTING state, cancel any active timer
-        if current_state == RoomState.VOTING:
+        # Cancel timers for states we are exiting
+        if current_state == RoomState.QUESTIONING:
+            from app.services.questioning_service import questioning_service
+            questioning_service.cancel_questioning_timer(room.id)
+        elif current_state == RoomState.VOTING:
             from app.services.voting_service import voting_service
             voting_service.cancel_voting_timer(room.id)
+        elif current_state == RoomState.ONE_ON_ONE:
+            from app.services.one_on_one_service import one_on_one_service
+            one_on_one_service.cancel_session_timer(room.id)
+        elif current_state == RoomState.FINAL_SELECTION:
+            from app.services.match_service import match_service
+            match_service.cancel_final_selection_timer(room.id)
 
-        # When entering QUESTIONING, automatically start the question round
+        # When entering QUESTIONING, automatically start question round and questioning timer
         if target_state == RoomState.QUESTIONING:
             from app.services.questioning_service import questioning_service
             await questioning_service.start_questioning_round(db, room)
+            questioning_service.start_questioning_timer(room.id)
 
         # When entering VOTING, broadcast voting_started event with total voters & timeout, and start timer
         if target_state == RoomState.VOTING:
@@ -145,10 +155,11 @@ class RoomStateService:
             from app.services.one_on_one_service import one_on_one_service
             await one_on_one_service.initialize_sessions_for_room(db, room)
 
-        # When entering FINAL_SELECTION, notify challenger privately and broadcast to room
+        # When entering FINAL_SELECTION, start final selection timer, notify challenger privately and broadcast to room
         if target_state == RoomState.FINAL_SELECTION:
             from app.services.match_service import match_service
             finalist_users = match_service.get_eligible_finalists(db, room.id)
+            match_service.start_final_selection_timer(room.id)
             # Private event to challenger
             if room.challenger_id is not None:
                 await ws_manager.send_to_user(

@@ -40,11 +40,13 @@ from app.schemas.one_on_one import (
     PrivateVoteSubmitRequest,
 )
 from app.schemas.room import ParticipantDetail, RoomDetail, RoomRead
+from app.schemas.timer import TimerStatusResponse
 from app.schemas.vote import VoteRead, VoteSubmitRequest, VotingStatusResponse
 from app.services.match_service import match_service
 from app.services.one_on_one_service import one_on_one_service
 from app.services.questioning_service import questioning_service
 from app.services.room_manager import room_manager
+from app.services.timer_service import timer_service
 from app.services.voting_service import voting_service
 
 logger = logging.getLogger(__name__)
@@ -82,6 +84,18 @@ def get_room(room_id: int, db: Session = Depends(get_db)) -> RoomDetail:
         room=RoomRead.model_validate(room),
         participants=participant_details,
     )
+
+
+@router.get("/{room_id}/timer", response_model=TimerStatusResponse)
+def get_room_timer(room_id: int, db: Session = Depends(get_db)) -> TimerStatusResponse:
+    """
+    Retrieve the current countdown timer status for a room.
+    Used by frontend clients on page load or refresh to initialize and run a local countdown clock.
+    """
+    logger.debug("Fetching countdown timer status for room_id=%d", room_id)
+    room = room_manager.get_room(db, room_id)
+    timer_info = timer_service.get_timer_info(room.id)
+    return TimerStatusResponse(**timer_info)
 
 
 @router.post("/{room_id}/answers", response_model=AnswerRead, status_code=status.HTTP_201_CREATED)

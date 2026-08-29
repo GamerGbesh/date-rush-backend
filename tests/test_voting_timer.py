@@ -5,6 +5,7 @@ from app.enums import Gender, ParticipantStatus, PlayerRole, RoomState, UserStat
 from app.models.room import Room, RoomParticipant
 from app.models.user import User
 from app.services.room_state_service import room_state_service
+from app.services.timer_service import timer_service
 from app.services.voting_service import voting_service
 
 
@@ -82,7 +83,7 @@ async def test_early_all_votes_cancels_timer_and_transitions(client, db):
 
     # Start long timer
     voting_service.start_voting_timer(room.id, room.current_round, duration_seconds=10.0)
-    assert room.id in voting_service._timers
+    assert timer_service.get_timer_info(room.id)["active"] is True
 
     # Both users vote YES immediately
     client.post(f"/rooms/{room.id}/vote", json={"user_id": audience[0].id, "vote": "yes"})
@@ -91,8 +92,9 @@ async def test_early_all_votes_cancels_timer_and_transitions(client, db):
     db.refresh(room)
     assert room.state == RoomState.ONE_ON_ONE
 
-    # Timer should be cancelled and cleaned up
-    assert room.id not in voting_service._timers
+    # Voting timer was cancelled and 1-on-1 session question timer started
+    timer_info = timer_service.get_timer_info(room.id)
+    assert timer_info["timer_type"] == "one_on_one_question"
 
 
 @pytest.mark.asyncio
