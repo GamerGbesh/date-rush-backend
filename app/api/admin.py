@@ -16,6 +16,7 @@ Endpoints:
     DELETE /admin/questions/{question_id}     Delete a question
 """
 
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -41,6 +42,7 @@ from app.schemas.room import (
 from app.services.question_service import question_service
 from app.services.room_state_service import room_state_service
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
@@ -104,6 +106,7 @@ def _build_room_admin_detail(db: Session, room: Room) -> RoomAdminDetail:
 @router.get("/rooms", response_model=list[RoomAdminSummary])
 def list_rooms(db: Session = Depends(get_db)) -> list[RoomAdminSummary]:
     """List all active (non-completed) rooms with key details."""
+    logger.debug("Admin listing all active rooms")
     rooms = list(
         db.execute(
             select(Room).where(Room.state != RoomState.COMPLETED).order_by(Room.id)
@@ -143,8 +146,10 @@ def list_rooms(db: Session = Depends(get_db)) -> list[RoomAdminSummary]:
 @router.get("/rooms/{room_id}", response_model=RoomAdminDetail)
 def get_room_admin(room_id: int, db: Session = Depends(get_db)) -> RoomAdminDetail:
     """Retrieve comprehensive room details for admin inspection."""
+    logger.debug("Admin inspecting room_id=%d", room_id)
     room = db.get(Room, room_id)
     if room is None:
+        logger.warning("Admin inspect failed: Room %d not found", room_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Room {room_id} not found.",
@@ -159,12 +164,16 @@ async def transition_room(
     db: Session = Depends(get_db),
 ) -> RoomAdminDetail:
     """Transition a room to the requested state."""
+    logger.info("Admin requesting transition for room %d to state %s", room_id, payload.state.value)
     try:
         room = await room_state_service.transition(db, room_id, payload.state)
+        logger.info("Admin transition successful for room %d: state is now %s", room.id, room.state.value)
         return _build_room_admin_detail(db, room)
     except RoomNotFoundError as exc:
+        logger.warning("Admin transition failed: %s", exc)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except InvalidRoomTransitionError as exc:
+        logger.warning("Admin transition invalid: %s", exc.message)
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.message)
 
 
@@ -174,12 +183,16 @@ async def start_room(
     db: Session = Depends(get_db),
 ) -> RoomAdminDetail:
     """Convenience endpoint to start a room (READY -> INTRO)."""
+    logger.info("Admin start room requested: room_id=%d", room_id)
     try:
         room = await room_state_service.transition(db, room_id, RoomState.INTRO)
+        logger.info("Room %d started successfully (state=INTRO)", room.id)
         return _build_room_admin_detail(db, room)
     except RoomNotFoundError as exc:
+        logger.warning("Admin start room failed: %s", exc)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except InvalidRoomTransitionError as exc:
+        logger.warning("Admin start room invalid transition: %s", exc.message)
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.message)
 
 
@@ -189,12 +202,16 @@ async def start_questioning(
     db: Session = Depends(get_db),
 ) -> RoomAdminDetail:
     """Convenience endpoint to move room into questioning (INTRO -> QUESTIONING)."""
+    logger.info("Admin start questioning requested: room_id=%d", room_id)
     try:
         room = await room_state_service.transition(db, room_id, RoomState.QUESTIONING)
+        logger.info("Room %d moved to questioning successfully (round=%d)", room.id, room.current_round)
         return _build_room_admin_detail(db, room)
     except RoomNotFoundError as exc:
+        logger.warning("Admin start questioning failed: %s", exc)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except InvalidRoomTransitionError as exc:
+        logger.warning("Admin start questioning invalid transition: %s", exc.message)
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.message)
 
 
@@ -204,8 +221,10 @@ def get_room_history(
     db: Session = Depends(get_db),
 ) -> list[RoomStateHistoryRead]:
     """Retrieve the state transition history audit log for a room."""
+    logger.debug("Admin history requested: room_id=%d", room_id)
     room = db.get(Room, room_id)
     if room is None:
+        logger.warning("Admin get room history failed: Room %d not found", room_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Room {room_id} not found.",
@@ -224,6 +243,7 @@ def create_question(
     payload: QuestionCreate, db: Session = Depends(get_db)
 ) -> QuestionRead:
     """Create a new question in the question pool."""
+    logger.info("Admin creating question: target=%s, text='%s'", payload.target_gender, payload.text)
     question = question_service.create_question(db, payload)
     return QuestionRead.model_validate(question)
 
@@ -233,6 +253,7 @@ def list_questions(
     active: bool | None = None, db: Session = Depends(get_db)
 ) -> list[QuestionRead]:
     """List questions in the question pool with optional active status filter."""
+    logger.debug("Admin listing questions (active=%s)", active)
     questions = question_service.list_questions(db, active=active)
     return [QuestionRead.model_validate(q) for q in questions]
 
@@ -242,10 +263,12 @@ def get_question(
     question_id: int, db: Session = Depends(get_db)
 ) -> QuestionRead:
     """Retrieve a specific question by ID."""
+    logger.debug("Admin get question: question_id=%d", question_id)
     try:
         question = question_service.get_question(db, question_id)
         return QuestionRead.model_validate(question)
     except QuestionNotFoundError as exc:
+        logger.warning("Get question %d failed: %s", question_id, exc)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
 
 
@@ -256,10 +279,12 @@ def update_question(
     db: Session = Depends(get_db),
 ) -> QuestionRead:
     """Update question text, target_gender, or active status."""
+    logger.info("Admin updating question %d", question_id)
     try:
         question = question_service.update_question(db, question_id, payload)
         return QuestionRead.model_validate(question)
     except QuestionNotFoundError as exc:
+        logger.warning("Update question %d failed: %s", question_id, exc)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
 
 
@@ -268,7 +293,10 @@ def delete_question(
     question_id: int, db: Session = Depends(get_db)
 ) -> None:
     """Delete a question from the pool."""
+    logger.info("Admin deleting question %d", question_id)
     try:
         question_service.delete_question(db, question_id)
     except QuestionNotFoundError as exc:
+        logger.warning("Delete question %d failed: %s", question_id, exc)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+

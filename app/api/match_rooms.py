@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -19,6 +21,7 @@ from app.schemas.match_room import (
 )
 from app.services.match_room_service import match_room_service
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/match-rooms", tags=["match-rooms"])
 
 
@@ -31,6 +34,7 @@ def get_match_room(
     """
     Retrieve match room status for an authorized matched participant.
     """
+    logger.debug("Match room detail requested: match_room_id=%d, user_id=%d", match_room_id, user_id)
     try:
         match_room = match_room_service.get_match_room_for_user(
             db=db, match_room_id=match_room_id, user_id=user_id
@@ -57,10 +61,11 @@ def get_match_room(
             completed_at=match_room.completed_at,
         )
     except MatchRoomNotFoundError as exc:
+        logger.warning("Match room %d not found", match_room_id)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except MatchRoomUnauthorizedError as exc:
+        logger.warning("User %d unauthorized for match room %d", user_id, match_room_id)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
-
 
 
 @router.get("/{match_room_id}/contacts", response_model=MatchRoomContactsResponse)
@@ -73,13 +78,16 @@ def get_contacts_status(
     Retrieve contact exchange status for a participant in a private match room.
     Partner contact details are only revealed after both participants have submitted.
     """
+    logger.debug("Contacts status requested: match_room_id=%d, user_id=%d", match_room_id, user_id)
     try:
         return match_room_service.get_contacts_status(
             db=db, match_room_id=match_room_id, user_id=user_id
         )
     except MatchRoomNotFoundError as exc:
+        logger.warning("Match room %d not found", match_room_id)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except MatchRoomUnauthorizedError as exc:
+        logger.warning("User %d unauthorized for match room %d", user_id, match_room_id)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
 
 
@@ -97,6 +105,7 @@ async def submit_contact(
     Submit contact information (WhatsApp, Snapchat, or both) for a matched participant.
     Once both participants submit, contact details are automatically exchanged and users completed.
     """
+    logger.info("Submitting contact info: match_room_id=%d, user_id=%d", match_room_id, payload.user_id)
     try:
         await match_room_service.submit_contact(
             db=db,
@@ -105,16 +114,22 @@ async def submit_contact(
             whatsapp=payload.whatsapp,
             snapchat=payload.snapchat,
         )
+        logger.info("Contact info submitted successfully: match_room_id=%d, user_id=%d", match_room_id, payload.user_id)
         return match_room_service.get_contacts_status(
             db=db, match_room_id=match_room_id, user_id=payload.user_id
         )
     except MatchRoomNotFoundError as exc:
+        logger.warning("Contact submission failed: %s", exc)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     except MatchRoomUnauthorizedError as exc:
+        logger.warning("Contact submission unauthorized: %s", exc)
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc))
     except (InvalidMatchRoomStateError, DuplicateContactSubmissionError) as exc:
+        logger.warning("Contact submission conflict: %s", exc)
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     except InvalidContactPayloadError as exc:
+        logger.warning("Contact submission payload invalid: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
         )
+

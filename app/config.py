@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     # Duration (in seconds) for public voting round before auto-finalization
     VOTING_TIMEOUT_SECONDS: int = 30
 
+    # Logging configuration
+    LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str = "%(asctime)s | %(levelname)-7s | %(name)s - %(message)s"
+
 
 settings = Settings()
 

@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -9,6 +11,7 @@ from app.schemas.queue import QueueJoinRequest, QueueJoinResponse, QueueStatusRe
 from app.services.queue_manager import queue_manager
 from app.enums import Gender, UserState
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/queue", tags=["queue"])
 
 
@@ -27,17 +30,21 @@ def join_queue(payload: QueueJoinRequest, db: Session = Depends(get_db)) -> Queu
             → queue_manager.try_create_rooms()
             → return current state + room_id (if assigned)
     """
+    logger.info("Join queue request received: name='%s', gender=%s", payload.name, payload.gender)
     # 1. Create the user record.
     user = User(name=payload.name, gender=payload.gender)
     db.add(user)
     db.commit()
     db.refresh(user)
+    logger.info("User created: id=%d, name='%s', gender=%s", user.id, user.name, user.gender.value)
 
     # 2. Move into the queue.
     queue_manager.add(db, user)
 
     # 3. Attempt room creation — may consume this user.
-    queue_manager.try_create_rooms(db)
+    created_rooms = queue_manager.try_create_rooms(db)
+    if created_rooms:
+        logger.info("Room creation triggered: %d room(s) formed", len(created_rooms))
 
     # 4. Refresh to get the latest state (might now be IN_GAME).
     db.refresh(user)
@@ -54,13 +61,18 @@ def join_queue(payload: QueueJoinRequest, db: Session = Depends(get_db)) -> Queu
         if participant:
             room_id = participant.room_id
 
+    logger.info("User %d join_queue result: state=%s, room_id=%s", user.id, user.state.value, room_id)
     return QueueJoinResponse(user_id=user.id, state=user.state, room_id=room_id)
 
 
 @router.get("/status", response_model=QueueStatusResponse)
 def queue_status(db: Session = Depends(get_db)) -> QueueStatusResponse:
     """Return the current number of queued users per gender."""
+    male_count = queue_manager.get_size(db, Gender.MALE)
+    female_count = queue_manager.get_size(db, Gender.FEMALE)
+    logger.debug("Queue status queried: male=%d, female=%d", male_count, female_count)
     return QueueStatusResponse(
-        male=queue_manager.get_size(db, Gender.MALE),
-        female=queue_manager.get_size(db, Gender.FEMALE),
+        male=male_count,
+        female=female_count,
     )
+

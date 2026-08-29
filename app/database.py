@@ -1,9 +1,12 @@
+import logging
+
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.pool import NullPool, QueuePool
 
 from app.config import settings
 
-from sqlalchemy.pool import NullPool, QueuePool
+logger = logging.getLogger(__name__)
 
 connect_args = {}
 if settings.DATABASE_URL.startswith("sqlite"):
@@ -25,8 +28,9 @@ if settings.DATABASE_URL.startswith("sqlite"):
             cursor.execute("PRAGMA busy_timeout=5000")
             cursor.execute("PRAGMA synchronous=NORMAL")
             cursor.close()
+            logger.debug("Configured SQLite connection pragmas: WAL mode, busy_timeout=5000, synchronous=NORMAL")
         except Exception:
-            pass
+            logger.exception("Failed to configure SQLite pragmas")
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -51,11 +55,13 @@ def init_db() -> None:
     This ensures the database schema is always up to date and default questions
     are seeded for matchmaking rooms.
     """
+    logger.info("Initializing database: Running Alembic upgrade to head...")
     from alembic import command
     from alembic.config import Config
 
     alembic_cfg = Config("alembic.ini")
     command.upgrade(alembic_cfg, "head")
+    logger.info("Alembic schema migrations applied successfully.")
 
     # Seed default questions if table is empty
     from app.enums import QuestionTarget
@@ -63,7 +69,10 @@ def init_db() -> None:
 
     db = SessionLocal()
     try:
-        if db.query(Question).count() == 0:
+        question_count = db.query(Question).count()
+        logger.info("Checking question pool: %d questions currently present.", question_count)
+        if question_count == 0:
+            logger.info("Seeding default question pool...")
             default_questions = [
                 # ANY target
                 Question(text="What is your idea of a perfect weekend date?", target_gender=QuestionTarget.ANY, active=True),
@@ -83,5 +92,11 @@ def init_db() -> None:
             ]
             db.add_all(default_questions)
             db.commit()
+            logger.info("Seeded %d default questions successfully.", len(default_questions))
+        else:
+            logger.info("Question pool already seeded with %d questions.", question_count)
+    except Exception:
+        logger.exception("Error during question seeding in init_db")
+        raise
     finally:
         db.close()

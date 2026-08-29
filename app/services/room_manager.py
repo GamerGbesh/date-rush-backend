@@ -33,6 +33,7 @@ class RoomManager:
         db.add(room)
         db.commit()
         db.refresh(room)
+        logger.info("Created room %d in WAITING state with challenger_gender=%s", room.id, challenger_gender.value)
         return room
 
     def create_room_with_participants(
@@ -149,6 +150,7 @@ class RoomManager:
         db.commit()
         db.refresh(participant)
         db.refresh(user)
+        logger.info("Added user %d to room %d as role=%s", user.id, room.id, role.value)
         return participant
 
     def remove_participant(
@@ -160,6 +162,7 @@ class RoomManager:
         """
         participant = db.get(RoomParticipant, (room.id, user.id))
         if participant is None:
+            logger.warning("Attempted to remove non-participant user %d from room %d", user.id, room.id)
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"User {user.id} is not a participant in room {room.id}.",
@@ -169,13 +172,16 @@ class RoomManager:
         db.commit()
         db.refresh(participant)
         db.refresh(user)
+        logger.info("Removed user %d from room %d (user state -> QUEUED)", user.id, room.id)
         return participant
 
     def set_state(self, db: Session, room: Room, new_state: RoomState) -> Room:
         """Transition a room to a new state."""
+        old_state = room.state
         room.state = new_state
         db.commit()
         db.refresh(room)
+        logger.info("Room %d state updated: %s -> %s", room.id, old_state.value, new_state.value)
         return room
 
     def get_active_participants(

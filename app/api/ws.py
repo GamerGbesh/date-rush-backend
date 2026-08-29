@@ -32,6 +32,7 @@ async def room_websocket_endpoint(
     3. Immediately delivers the room's current state.
     4. Keeps the socket open; unregisters on disconnect without altering persistent DB state.
     """
+    logger.info("Incoming WebSocket connection attempt for room %d by user %d", room_id, user_id)
     initial_payloads = []
     with database.SessionLocal() as db:
         # Verify participant membership
@@ -54,6 +55,7 @@ async def room_websocket_endpoint(
 
         room = db.get(Room, room_id)
         if not room:
+            logger.warning("WebSocket rejected: room %d not found in DB", room_id)
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
 
@@ -183,6 +185,7 @@ async def match_room_websocket_endpoint(
     Private WebSocket channel for the two matched participants in a MatchRoom.
     Unauthorized users and outsiders are strictly rejected.
     """
+    logger.info("Incoming Match Room WS connection attempt: match_room_id=%d, user_id=%d", match_room_id, user_id)
     from app.enums import MatchRoomState
     from app.models.match_contact import MatchContact
     from app.models.match_room import MatchRoom
@@ -289,6 +292,7 @@ async def queue_websocket_endpoint(
     5. Attempts to form rooms if threshold is met.
     6. Automatically evicts the user from the queue on disconnect (instant cleanup).
     """
+    logger.info("Incoming Queue WS connection attempt: user_id=%d", user_id)
     initial_payload = None
     with database.SessionLocal() as db:
         user = db.get(User, user_id)

@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -8,6 +10,7 @@ from app.models.room import RoomParticipant
 from app.models.user import User
 from app.schemas.user import UserCreate, UserProfileResponse, UserRead
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/users", tags=["users"])
 
 
@@ -17,10 +20,12 @@ def create_user(payload: UserCreate, db: Session = Depends(get_db)) -> UserRead:
     Register a new user.
     The user starts in WAITING state.
     """
+    logger.info("Registering new user: name='%s', gender=%s", payload.name, payload.gender)
     user = User(name=payload.name, gender=payload.gender)
     db.add(user)
     db.commit()
     db.refresh(user)
+    logger.info("User registered successfully: id=%d, name='%s', gender=%s, state=%s", user.id, user.name, user.gender.value, user.state.value)
     return UserRead.model_validate(user)
 
 
@@ -33,8 +38,10 @@ def get_current_user_profile(
     Retrieve the current user's profile and event/game state.
     Used by frontend on app load, refresh, or reconnect to derive screen state.
     """
+    logger.debug("Fetching profile for user_id=%d", user_id)
     user = db.get(User, user_id)
     if not user:
+        logger.warning("Profile request failed: User %d not found", user_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"User {user_id} not found."
         )
@@ -69,6 +76,16 @@ def get_current_user_profile(
         if match.match_room:
             match_room_id = match.match_room.id
 
+    logger.debug(
+        "User profile retrieved: id=%d, state=%s, room_id=%s, role=%s, match_id=%s, match_room_id=%s",
+        user.id,
+        user.state.value,
+        room_id,
+        role,
+        match_id,
+        match_room_id,
+    )
+
     return UserProfileResponse(
         id=user.id,
         name=user.name,
@@ -85,10 +102,13 @@ def get_current_user_profile(
 @router.get("/{user_id}", response_model=UserRead)
 def get_user(user_id: int, db: Session = Depends(get_db)) -> UserRead:
     """Retrieve public user profile by ID."""
+    logger.debug("Fetching public user info for user_id=%d", user_id)
     user = db.get(User, user_id)
     if not user:
+        logger.warning("Get user failed: User %d not found", user_id)
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"User {user_id} not found."
         )
     return UserRead.model_validate(user)
+
 
