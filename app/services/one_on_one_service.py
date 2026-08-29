@@ -144,9 +144,24 @@ class OneOnOneService:
 
             # Notify audience member of elimination
             await ws_manager.send_to_user(
-                room_id, session.audience_id, {"type": "eliminated", "room_id": room_id}
+                room_id,
+                session.audience_id,
+                {"type": "eliminated", "room_id": room_id, "reason": "You ran out of time to ask a question."},
             )
             ws_manager.disconnect(room_id, session.audience_id)
+
+            # Notify challenger that this 1-on-1 session completed due to timeout
+            await ws_manager.send_to_user(
+                room_id,
+                session.challenger_id,
+                {
+                    "type": "one_on_one_completed",
+                    "room_id": room_id,
+                    "session_id": session.id,
+                    "result": "rejected",
+                    "audience_id": session.audience_id,
+                },
+            )
 
             await self.activate_next_session(db, room_id)
 
@@ -540,7 +555,9 @@ class OneOnOneService:
 
             # Notify audience member of elimination and disconnect socket
             await ws_manager.send_to_user(
-                room_id, session.audience_id, {"type": "eliminated", "room_id": room_id}
+                room_id,
+                session.audience_id,
+                {"type": "eliminated", "room_id": room_id, "reason": "You chose not to advance with the challenger."},
             )
             ws_manager.disconnect(room_id, session.audience_id)
         else:
@@ -696,7 +713,7 @@ class OneOnOneService:
                             await ws_manager.send_to_user(
                                 room.id,
                                 p_challenger.user_id,
-                                {"type": "eliminated", "room_id": room.id},
+                                {"type": "eliminated", "room_id": room.id, "reason": "None of the participants voted to match with you."},
                             )
                             ws_manager.disconnect(room.id, p_challenger.user_id)
 

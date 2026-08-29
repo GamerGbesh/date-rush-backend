@@ -281,7 +281,7 @@ class VotingService:
             )
             vote_map = {v.voter_id: v.vote for v in votes}
 
-            eliminated_users: list[User] = []
+            eliminated_users: list[tuple[User, str]] = []
             survivors: list[RoomParticipant] = []
 
             for p in active_participants:
@@ -297,7 +297,8 @@ class VotingService:
                     user = db.get(User, p.user_id)
                     if user:
                         user.state = UserState.WAITING
-                        eliminated_users.append(user)
+                        reason = "You voted No on the challenger." if choice == VoteChoice.NO else "You did not cast your vote in time."
+                        eliminated_users.append((user, reason))
 
             # If zero survivors remain, also eliminate the challenger
             if len(survivors) == 0 and room.challenger_id is not None:
@@ -315,15 +316,15 @@ class VotingService:
                     challenger_user = db.get(User, p_challenger.user_id)
                     if challenger_user:
                         challenger_user.state = UserState.WAITING
-                        eliminated_users.append(challenger_user)
+                        eliminated_users.append((challenger_user, "No one voted for you. Better luck next time!"))
 
             db.commit()
             db.refresh(room)
 
             # Notify and disconnect eliminated participants
-            for user in eliminated_users:
+            for user, reason in eliminated_users:
                 await ws_manager.send_to_user(
-                    room.id, user.id, {"type": "eliminated", "room_id": room.id}
+                    room.id, user.id, {"type": "eliminated", "room_id": room.id, "reason": reason}
                 )
                 ws_manager.disconnect(room.id, user.id)
 
