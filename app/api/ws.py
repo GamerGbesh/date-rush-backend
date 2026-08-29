@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.enums import RoomState
 from app.models.one_on_one_session import OneOnOneSession
@@ -98,6 +99,7 @@ async def room_websocket_endpoint(
                 "type": "voting_started",
                 "room_id": room.id,
                 "total_voters": active_voters_count,
+                "timeout_seconds": settings.VOTING_TIMEOUT_SECONDS,
             }
         )
 

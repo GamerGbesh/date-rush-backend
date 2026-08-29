@@ -44,6 +44,8 @@ class OneOnOneSessionPublicSummary(BaseModel):
 
     id: int
     room_id: int
+    audience_id: int | None = None
+    challenger_id: int | None = None
     sequence: int
     state: OneOnOneSessionState
 

@@ -491,6 +491,30 @@ class OneOnOneService:
                     from app.services.match_service import match_service
                     await match_service.create_match_for_single_survivor(db, room, finalists[0].user_id)
                 else:
+                    if room.challenger_id is not None:
+                        p_challenger = next(
+                            (
+                                p
+                                for p in room.participants
+                                if p.user_id == room.challenger_id and p.left_at is None
+                            ),
+                            None,
+                        )
+                        if p_challenger:
+                            p_challenger.status = ParticipantStatus.ELIMINATED
+                            p_challenger.left_at = datetime.now(timezone.utc)
+                            c_user = db.get(User, p_challenger.user_id)
+                            if c_user:
+                                c_user.state = UserState.QUEUED
+                                c_user.queued_at = datetime.now(timezone.utc)
+                            db.commit()
+                            await ws_manager.send_to_user(
+                                room.id,
+                                p_challenger.user_id,
+                                {"type": "eliminated", "room_id": room.id},
+                            )
+                            ws_manager.disconnect(room.id, p_challenger.user_id)
+
                     await room_state_service.transition(db, room.id, RoomState.COMPLETED)
 
                 # Trigger queue manager room creation check for newly re-queued users

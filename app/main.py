@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, status
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.admin import router as admin_router
@@ -10,6 +11,7 @@ from app.api.queue import router as queue_router
 from app.api.rooms import router as rooms_router
 from app.api.users import router as users_router
 from app.api.ws import router as ws_router
+from app.config import settings
 from app.database import init_db
 from app.exceptions import InvalidRoomTransitionError, MatchRoomNotFoundError, RoomNotFoundError
 
@@ -26,6 +28,14 @@ app = FastAPI(
     description="Live matchmaking event system — backend API.",
     version="0.1.0",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.CORS_ORIGINS,
+    allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
+    allow_methods=settings.CORS_ALLOW_METHODS,
+    allow_headers=settings.CORS_ALLOW_HEADERS,
 )
 
 app.include_router(users_router)

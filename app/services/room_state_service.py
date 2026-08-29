@@ -109,13 +109,21 @@ class RoomStateService:
         }
         await ws_manager.broadcast(room.id, event_payload)
 
+        # If leaving VOTING state, cancel any active timer
+        if current_state == RoomState.VOTING:
+            from app.services.voting_service import voting_service
+            voting_service.cancel_voting_timer(room.id)
+
         # When entering QUESTIONING, automatically start the question round
         if target_state == RoomState.QUESTIONING:
             from app.services.questioning_service import questioning_service
             await questioning_service.start_questioning_round(db, room)
 
-        # When entering VOTING, broadcast voting_started event with total voters
+        # When entering VOTING, broadcast voting_started event with total voters & timeout, and start timer
         if target_state == RoomState.VOTING:
+            from app.config import settings
+            from app.services.voting_service import voting_service
+
             active_voters_count = sum(
                 1
                 for p in room.participants
@@ -127,8 +135,10 @@ class RoomStateService:
                     "type": "voting_started",
                     "room_id": room.id,
                     "total_voters": active_voters_count,
+                    "timeout_seconds": settings.VOTING_TIMEOUT_SECONDS,
                 },
             )
+            voting_service.start_voting_timer(room.id, room.current_round)
 
         # When entering ONE_ON_ONE, automatically initialize 1-on-1 sessions
         if target_state == RoomState.ONE_ON_ONE:

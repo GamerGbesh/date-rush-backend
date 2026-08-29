@@ -23,6 +23,15 @@ class Settings(BaseSettings):
     # Maximum length for contact information fields (WhatsApp / Snapchat).
     CONTACT_MAX_LENGTH: int = 100
 
+    # CORS configuration
+    CORS_ORIGINS: list[str] = ["http://localhost:3000"]
+    CORS_ALLOW_CREDENTIALS: bool = True
+    CORS_ALLOW_METHODS: list[str] = ["*"]
+    CORS_ALLOW_HEADERS: list[str] = ["*"]
+
+    # Duration (in seconds) for public voting round before auto-finalization
+    VOTING_TIMEOUT_SECONDS: int = 30
+
 
 settings = Settings()
 

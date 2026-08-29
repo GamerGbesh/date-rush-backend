@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.enums import (
     ParticipantStatus,
     PlayerRole,
@@ -45,6 +46,59 @@ def _get_room_lock(room_id: int) -> asyncio.Lock:
 
 class VotingService:
     """Manages public voting lifecycle and elimination processing."""
+
+    def __init__(self) -> None:
+        self._timers: dict[int, asyncio.Task] = {}
+
+    def start_voting_timer(
+        self,
+        room_id: int,
+        round_number: int,
+        duration_seconds: float | None = None,
+    ) -> None:
+        """Start a background countdown timer to auto-finalize voting when time runs out."""
+        self.cancel_voting_timer(room_id)
+        duration = duration_seconds if duration_seconds is not None else float(settings.VOTING_TIMEOUT_SECONDS)
+        self._timers[room_id] = asyncio.create_task(
+            self._run_voting_timer(room_id, round_number, duration)
+        )
+
+    def cancel_voting_timer(self, room_id: int) -> None:
+        """Cancel any pending voting timer for this room."""
+        task = self._timers.pop(room_id, None)
+        if task and not task.done():
+            task.cancel()
+
+    async def _run_voting_timer(
+        self,
+        room_id: int,
+        round_number: int,
+        duration_seconds: float,
+    ) -> None:
+        """Wait for duration and trigger finalization if room is still in VOTING state for round."""
+        try:
+            await asyncio.sleep(duration_seconds)
+            from app.database import SessionLocal
+
+            with SessionLocal() as db:
+                room = db.get(Room, room_id)
+                if room and room.state == RoomState.VOTING and room.current_round == round_number:
+                    logger.info(
+                        "Voting timer expired for room %d (round=%d). Finalizing voting automatically.",
+                        room_id,
+                        round_number,
+                    )
+                    await self.finalize_voting(db, room_id)
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception(
+                "Error in voting timer for room %d (round=%d)", room_id, round_number
+            )
+        finally:
+            current_task = asyncio.current_task()
+            if self._timers.get(room_id) == current_task:
+                self._timers.pop(room_id, None)
 
     def get_voting_status(
         self, db: Session, room_id: int, user_id: int | None = None
@@ -211,6 +265,9 @@ class VotingService:
         - Determine and transition to next state (ONE_ON_ONE, FINAL, or COMPLETED)
         - Trigger QueueManager room creation check
         """
+        # Cancel any active countdown timer for this room
+        self.cancel_voting_timer(room_id)
+
         lock = _get_room_lock(room_id)
         async with lock:
             room = db.get(Room, room_id)
@@ -247,7 +304,11 @@ class VotingService:
 
             for p in active_participants:
                 choice = vote_map.get(p.user_id)
-                if choice == VoteChoice.NO:
+                if choice == VoteChoice.YES:
+                    p.status = ParticipantStatus.ACTIVE
+                    survivors.append(p)
+                else:
+                    # Participant voted NO or failed to vote before timeout
                     p.status = ParticipantStatus.ELIMINATED
                     p.left_at = datetime.now(timezone.utc)
 
@@ -256,9 +317,25 @@ class VotingService:
                         user.state = UserState.QUEUED
                         user.queued_at = datetime.now(timezone.utc)
                         eliminated_users.append(user)
-                else:
-                    p.status = ParticipantStatus.ACTIVE
-                    survivors.append(p)
+
+            # If zero survivors remain, also eliminate and re-queue the challenger
+            if len(survivors) == 0 and room.challenger_id is not None:
+                p_challenger = next(
+                    (
+                        p
+                        for p in room.participants
+                        if p.user_id == room.challenger_id and p.left_at is None
+                    ),
+                    None,
+                )
+                if p_challenger:
+                    p_challenger.status = ParticipantStatus.ELIMINATED
+                    p_challenger.left_at = datetime.now(timezone.utc)
+                    challenger_user = db.get(User, p_challenger.user_id)
+                    if challenger_user:
+                        challenger_user.state = UserState.QUEUED
+                        challenger_user.queued_at = datetime.now(timezone.utc)
+                        eliminated_users.append(challenger_user)
 
             db.commit()
             db.refresh(room)

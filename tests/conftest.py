@@ -44,25 +44,26 @@ def db(db_engine):
     TestingSessionLocal = sessionmaker(
         autocommit=False, autoflush=False, bind=db_engine
     )
-    session = TestingSessionLocal()
-    try:
-        # Seed default pool of active questions for room creation
-        default_questions = [
-            Question(text=f"Any Question {i}", target_gender=QuestionTarget.ANY, active=True)
-            for i in range(1, 6)
-        ] + [
-            Question(text=f"Male Question {i}", target_gender=QuestionTarget.MALE, active=True)
-            for i in range(1, 6)
-        ] + [
-            Question(text=f"Female Question {i}", target_gender=QuestionTarget.FEMALE, active=True)
-            for i in range(1, 6)
-        ]
-        session.add_all(default_questions)
-        session.commit()
+    with patch("app.database.SessionLocal", TestingSessionLocal):
+        session = TestingSessionLocal()
+        try:
+            # Seed default pool of active questions for room creation
+            default_questions = [
+                Question(text=f"Any Question {i}", target_gender=QuestionTarget.ANY, active=True)
+                for i in range(1, 6)
+            ] + [
+                Question(text=f"Male Question {i}", target_gender=QuestionTarget.MALE, active=True)
+                for i in range(1, 6)
+            ] + [
+                Question(text=f"Female Question {i}", target_gender=QuestionTarget.FEMALE, active=True)
+                for i in range(1, 6)
+            ]
+            session.add_all(default_questions)
+            session.commit()
 
-        yield session
-    finally:
-        session.close()
+            yield session
+        finally:
+            session.close()
 
 
 @pytest.fixture()
