@@ -60,6 +60,7 @@ def init_db() -> None:
     from alembic.config import Config
 
     alembic_cfg = Config("alembic.ini")
+    alembic_cfg.attributes["skip_logging"] = True
     command.upgrade(alembic_cfg, "head")
     logger.info("Alembic schema migrations applied successfully.")
 

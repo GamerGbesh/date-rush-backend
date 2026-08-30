@@ -32,9 +32,9 @@ config = context.config
 if not config.get_main_option("sqlalchemy.url") or config.get_main_option("sqlalchemy.url") in ("", "driver://user:pass@localhost/dbname"):
     config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 
-# Interpret the config file for Python logging if present.
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+# Interpret the config file for Python logging if present and not skipped programmatically.
+if config.config_file_name is not None and not config.attributes.get("skip_logging"):
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # The metadata object that autogenerate will inspect.
 target_metadata = Base.metadata

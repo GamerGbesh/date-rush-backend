@@ -39,7 +39,15 @@ def setup_logging(
     # Configure app logger namespace specifically
     app_logger = logging.getLogger("app")
     app_logger.setLevel(numeric_level)
+    app_logger.propagate = True
+
+    # Ensure uvicorn loggers output through our formatted console handler
+    for uvi_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        uvi_logger = logging.getLogger(uvi_name)
+        uvi_logger.setLevel(numeric_level)
+        uvi_logger.propagate = True
 
     # Quiet overly verbose noisy third-party loggers if at INFO
     if numeric_level > logging.DEBUG:
         logging.getLogger("asyncio").setLevel(logging.WARNING)
+        logging.getLogger("alembic.runtime.migration").setLevel(logging.INFO)
