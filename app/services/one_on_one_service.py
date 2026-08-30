@@ -53,7 +53,7 @@ class OneOnOneService:
 
     def start_question_timer(
         self, room_id: int, session_id: int, duration_seconds: float | None = None
-    ) -> None:
+    ):
         """Start countdown for audience member to submit private question."""
         duration = (
             duration_seconds
@@ -64,7 +64,7 @@ class OneOnOneService:
         async def _on_timeout():
             await self.handle_question_timeout(room_id, session_id)
 
-        timer_service.start_timer(
+        return timer_service.start_timer(
             room_id=room_id,
             timer_type="one_on_one_question",
             duration_seconds=duration,
@@ -74,7 +74,7 @@ class OneOnOneService:
 
     def start_answer_timer(
         self, room_id: int, session_id: int, duration_seconds: float | None = None
-    ) -> None:
+    ):
         """Start countdown for challenger to answer private question."""
         duration = (
             duration_seconds
@@ -85,7 +85,7 @@ class OneOnOneService:
         async def _on_timeout():
             await self.handle_answer_timeout(room_id, session_id)
 
-        timer_service.start_timer(
+        return timer_service.start_timer(
             room_id=room_id,
             timer_type="one_on_one_answer",
             duration_seconds=duration,
@@ -95,7 +95,7 @@ class OneOnOneService:
 
     def start_vote_timer(
         self, room_id: int, session_id: int, duration_seconds: float | None = None
-    ) -> None:
+    ):
         """Start countdown for audience member to submit private vote."""
         duration = (
             duration_seconds
@@ -106,7 +106,7 @@ class OneOnOneService:
         async def _on_timeout():
             await self.handle_vote_timeout(room_id, session_id)
 
-        timer_service.start_timer(
+        return timer_service.start_timer(
             room_id=room_id,
             timer_type="one_on_one_vote",
             duration_seconds=duration,
@@ -180,6 +180,9 @@ class OneOnOneService:
             db.commit()
             db.refresh(session)
 
+            # Start voting timer
+            vote_timer = self.start_vote_timer(room_id, session.id)
+
             await ws_manager.send_to_users(
                 room_id,
                 [session.challenger_id, session.audience_id],
@@ -190,11 +193,11 @@ class OneOnOneService:
                     "sequence": session.sequence,
                     "answer": "[No Response]",
                     "text": "[No Response]",
+                    "timer_type": "one_on_one_vote",
+                    "duration_seconds": vote_timer.duration_seconds,
+                    "expires_at": vote_timer.expires_at.isoformat(),
                 },
             )
-
-            # Start voting timer
-            self.start_vote_timer(room_id, session.id)
 
     async def handle_vote_timeout(self, room_id: int, session_id: int) -> None:
         """Audience member failed to vote in time -> auto-submit NO vote."""
@@ -261,6 +264,7 @@ class OneOnOneService:
         if sessions:
             first_session = sessions[0]
             total_count = len(sessions)
+            q_timer = self.start_question_timer(room.id, first_session.id)
             await ws_manager.send_to_users(
                 room.id,
                 [first_session.challenger_id, first_session.audience_id],
@@ -272,6 +276,9 @@ class OneOnOneService:
                     "total": total_count,
                     "audience_id": first_session.audience_id,
                     "challenger_id": first_session.challenger_id,
+                    "timer_type": "one_on_one_question",
+                    "duration_seconds": q_timer.duration_seconds,
+                    "expires_at": q_timer.expires_at.isoformat(),
                 },
             )
             await ws_manager.broadcast(
@@ -283,8 +290,6 @@ class OneOnOneService:
                     "total": total_count,
                 },
             )
-            # Start timer for audience member to ask the private question
-            self.start_question_timer(room.id, first_session.id)
 
         return sessions
 
@@ -378,7 +383,7 @@ class OneOnOneService:
 
         # Cancel question timer and start challenger answer timer
         self.cancel_session_timer(room_id)
-        self.start_answer_timer(room_id, session.id)
+        ans_timer = self.start_answer_timer(room_id, session.id)
 
         # Send private question strictly to session participants over the GameRoom channel
         await ws_manager.send_to_users(
@@ -391,6 +396,9 @@ class OneOnOneService:
                 "sequence": session.sequence,
                 "question": cleaned_text,
                 "text": cleaned_text,
+                "timer_type": "one_on_one_answer",
+                "duration_seconds": ans_timer.duration_seconds,
+                "expires_at": ans_timer.expires_at.isoformat(),
             },
         )
 
@@ -459,7 +467,7 @@ class OneOnOneService:
 
         # Cancel answer timer and start audience private vote timer
         self.cancel_session_timer(room_id)
-        self.start_vote_timer(room_id, session.id)
+        vote_timer = self.start_vote_timer(room_id, session.id)
 
         # Send private answer strictly to session participants over the GameRoom channel
         await ws_manager.send_to_users(
@@ -472,6 +480,9 @@ class OneOnOneService:
                 "sequence": session.sequence,
                 "answer": cleaned_text,
                 "text": cleaned_text,
+                "timer_type": "one_on_one_vote",
+                "duration_seconds": vote_timer.duration_seconds,
+                "expires_at": vote_timer.expires_at.isoformat(),
             },
         )
 
@@ -656,6 +667,9 @@ class OneOnOneService:
                     next_session.sequence,
                     room_id,
                 )
+                # Start question timer for the newly activated session
+                q_timer = self.start_question_timer(room_id, next_session.id)
+
                 # Deliver one_on_one_started strictly to the new session participants
                 await ws_manager.send_to_users(
                     room_id,
@@ -668,10 +682,11 @@ class OneOnOneService:
                         "challenger_id": next_session.challenger_id,
                         "sequence": next_session.sequence,
                         "total": total_sessions,
+                        "timer_type": "one_on_one_question",
+                        "duration_seconds": q_timer.duration_seconds,
+                        "expires_at": q_timer.expires_at.isoformat(),
                     },
                 )
-                # Start question timer for the newly activated session
-                self.start_question_timer(room_id, next_session.id)
             else:
                 # All sessions completed!
                 self.cancel_session_timer(room_id)

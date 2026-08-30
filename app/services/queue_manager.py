@@ -195,32 +195,20 @@ class QueueManager:
     def notify_room_assigned(self, room_id: int, user_ids: list[int]) -> None:
         """Send room_assigned event to each user's queue WebSocket."""
         try:
-            import asyncio
             from app.services.websocket_manager import ws_manager
 
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-
             for uid in user_ids:
-                coro = ws_manager.send_to_queue_user(
-                    uid, {"type": "room_assigned", "room_id": room_id}
+                ws_manager.dispatch(
+                    ws_manager.send_to_queue_user(
+                        uid, {"type": "room_assigned", "room_id": room_id}
+                    )
                 )
-                if loop and loop.is_running():
-                    loop.create_task(coro)
-                else:
-                    try:
-                        asyncio.run(coro)
-                    except Exception:
-                        pass
         except Exception:
-            pass
+            logger.exception("Failed to dispatch notify_room_assigned")
 
     def broadcast_queue_status(self, db: Session) -> None:
         """Broadcast live queue status to all connected waiting users."""
         try:
-            import asyncio
             from app.models.room import Room
             from app.enums import RoomState
             from app.services.websocket_manager import ws_manager
@@ -239,21 +227,9 @@ class QueueManager:
                 "active_rooms": active_rooms,
             }
 
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
-
-            coro = ws_manager.broadcast_queue(payload)
-            if loop and loop.is_running():
-                loop.create_task(coro)
-            else:
-                try:
-                    asyncio.run(coro)
-                except Exception:
-                    pass
+            ws_manager.dispatch(ws_manager.broadcast_queue(payload))
         except Exception:
-            pass
+            logger.exception("Failed to dispatch broadcast_queue_status")
 
 
 queue_manager = QueueManager()

@@ -7,6 +7,7 @@ source of truth for all persistent state. On server restart, connections
 are lost (expected for a single-process event application).
 """
 
+import asyncio
 from collections.abc import Iterable
 import logging
 from collections import defaultdict
@@ -32,6 +33,29 @@ class WebSocketManager:
         self._match_room_connections: dict[int, dict[_UserId, WebSocket]] = defaultdict(dict)
         # { user_id: WebSocket }
         self._queue_connections: dict[_UserId, WebSocket] = {}
+        self.loop: asyncio.AbstractEventLoop | None = None
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """Store the primary running asyncio event loop for threadsafe dispatches."""
+        self.loop = loop
+
+    def dispatch(self, coro) -> None:
+        """Safely schedule a coroutine whether called from async context or sync worker thread."""
+        try:
+            current_loop = asyncio.get_running_loop()
+            if current_loop.is_running():
+                current_loop.create_task(coro)
+                return
+        except RuntimeError:
+            pass
+
+        if self.loop is not None and self.loop.is_running():
+            asyncio.run_coroutine_threadsafe(coro, self.loop)
+        else:
+            try:
+                asyncio.run(coro)
+            except Exception:
+                pass
 
     # -------------------------------------------------------------------------
     # Game Room channels (Multiplexed Transport)

@@ -27,6 +27,9 @@ logger = logging.getLogger("app.main")
 async def lifespan(app: FastAPI):
     """Create database tables on startup and log lifecycle."""
     logger.info("Starting Date Rush API: Initializing database and services...")
+    import asyncio
+    from app.services.websocket_manager import ws_manager
+    ws_manager.set_loop(asyncio.get_running_loop())
     init_db()
     logger.info("Date Rush API initialized and ready to serve requests.")
     yield

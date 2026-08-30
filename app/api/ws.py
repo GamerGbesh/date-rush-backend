@@ -286,14 +286,14 @@ async def queue_websocket_endpoint(
     WebSocket endpoint for the waiting queue.
     
     1. Validates that the user exists.
-    2. Registers the connection with ws_manager.connect_queue(user_id, websocket).
-    3. Places or ensures user is in QUEUED state in DB.
-    4. Delivers current queue_status statistics immediately.
-    5. Attempts to form rooms if threshold is met.
-    6. Automatically evicts the user from the queue on disconnect (instant cleanup).
+    2. Accepts connection and registers with ws_manager.connect_queue(user_id, websocket).
+    3. If user is already IN_GAME, MATCHED, or COMPLETED, delivers event immediately.
+    4. Otherwise places or ensures user is in QUEUED state in DB.
+    5. Delivers current queue_status statistics immediately.
+    6. Attempts to form rooms if threshold is met (notifying assigned users via WS).
+    7. Automatically evicts the user from the queue on disconnect (instant cleanup).
     """
     logger.info("Incoming Queue WS connection attempt: user_id=%d", user_id)
-    initial_payload = None
     with database.SessionLocal() as db:
         user = db.get(User, user_id)
         if not user:
@@ -301,7 +301,9 @@ async def queue_websocket_endpoint(
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
 
-        # If user is already in game, notify immediately
+        await websocket.accept()
+        ws_manager.connect_queue(user_id, websocket)
+
         if user.state == UserState.IN_GAME:
             participant = db.execute(
                 select(RoomParticipant).where(
@@ -310,41 +312,31 @@ async def queue_websocket_endpoint(
                 )
             ).scalars().first()
             if participant:
-                initial_payload = {"type": "room_assigned", "room_id": participant.room_id}
-        elif user.state not in (UserState.MATCHED, UserState.COMPLETED):
-            # Ensure user is queued in DB
+                await websocket.send_json({"type": "room_assigned", "room_id": participant.room_id})
+        elif user.state == UserState.MATCHED:
+            from app.models.match import Match
+            from sqlalchemy import or_
+            match = db.execute(
+                select(Match).where(
+                    or_(Match.challenger_id == user.id, Match.audience_id == user.id)
+                ).order_by(Match.id.desc())
+            ).scalars().first()
+            await websocket.send_json({"type": "matched", "match_id": match.id if match else None})
+        elif user.state == UserState.COMPLETED:
+            await websocket.send_json({"type": "completed"})
+        else:
+            # User is in queue
             if user.state != UserState.QUEUED:
                 user.state = UserState.QUEUED
                 user.queued_at = datetime.now(timezone.utc)
                 db.commit()
                 db.refresh(user)
 
-        if initial_payload is None:
-            # Deliver immediate queue statistics
-            active_rooms = db.execute(
-                select(func.count(Room.id)).where(Room.state != RoomState.COMPLETED)
-            ).scalar_one()
-
-            male_count = queue_manager.get_size(db, Gender.MALE)
-            female_count = queue_manager.get_size(db, Gender.FEMALE)
-
-            initial_payload = {
-                "type": "queue_status",
-                "male": male_count,
-                "female": female_count,
-                "active_rooms": active_rooms,
-            }
-
-            # Broadcast updated queue status to everyone in the waiting room
+            # Broadcast updated queue status to all connected waiting users (including newly connected user)
             queue_manager.broadcast_queue_status(db)
 
             # Check if rooms can now be formed
             queue_manager.try_create_rooms(db)
-
-    await websocket.accept()
-    ws_manager.connect_queue(user_id, websocket)
-    if initial_payload:
-        await websocket.send_json(initial_payload)
 
     try:
         while True:

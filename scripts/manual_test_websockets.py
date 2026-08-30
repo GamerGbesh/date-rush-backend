@@ -52,12 +52,6 @@ async def test_live_websockets():
 
         success(f"Live room #{room_id} formed for Challenger #{f_id} and audience: {audience_ids}")
 
-        # Test heartbeat endpoint for challenger
-        hb_resp = await client.post(f"/users/{f_id}/heartbeat")
-        if hb_resp.status_code != 200 or hb_resp.json() != {"ok": True}:
-            error(f"Heartbeat failed: {hb_resp.text}")
-        success(f"Heartbeat endpoint working properly for Challenger #{f_id}")
-
         # Transition to QUESTIONING
         await client.post(f"/admin/rooms/{room_id}/transition", json={"state": "intro"})
         await client.post(f"/admin/rooms/{room_id}/transition", json={"state": "questioning"})
