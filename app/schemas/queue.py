@@ -16,6 +16,7 @@ class QueueJoinResponse(BaseModel):
     user_id: int
     state: UserState
     room_id: int | None = None
+    role: str | None = None
 
 
 class QueueStatusResponse(BaseModel):

@@ -146,7 +146,7 @@ class QueueManager:
                             "Room %d created: female challenger %d, %d male audience",
                             room.id, challenger.id, len(audience),
                         )
-                        self.notify_room_assigned(room.id, [challenger.id, *(p.id for p in audience)])
+                        self.notify_room_assigned(room.id, challenger.id, [p.id for p in audience])
                         continue
 
                     if female_count >= threshold and male_count >= 1:
@@ -160,7 +160,7 @@ class QueueManager:
                             "Room %d created: male challenger %d, %d female audience",
                             room.id, challenger.id, len(audience),
                         )
-                        self.notify_room_assigned(room.id, [challenger.id, *(p.id for p in audience)])
+                        self.notify_room_assigned(room.id, challenger.id, [p.id for p in audience])
                         continue
                 except InsufficientQuestionsError as exc:
                     logger.warning("Room creation stopped: %s", exc)
@@ -192,15 +192,24 @@ class QueueManager:
         )
         return list(result.scalars().all())
 
-    def notify_room_assigned(self, room_id: int, user_ids: list[int]) -> None:
-        """Send room_assigned event to each user's queue WebSocket."""
+    def notify_room_assigned(
+        self, room_id: int, challenger_id: int, audience_ids: list[int]
+    ) -> None:
+        """Send room_assigned event with role to each user's queue WebSocket."""
         try:
             from app.services.websocket_manager import ws_manager
 
-            for uid in user_ids:
+            ws_manager.dispatch(
+                ws_manager.send_to_queue_user(
+                    challenger_id,
+                    {"type": "room_assigned", "room_id": room_id, "role": "challenger"},
+                )
+            )
+            for uid in audience_ids:
                 ws_manager.dispatch(
                     ws_manager.send_to_queue_user(
-                        uid, {"type": "room_assigned", "room_id": room_id}
+                        uid,
+                        {"type": "room_assigned", "room_id": room_id, "role": "audience"},
                     )
                 )
         except Exception:

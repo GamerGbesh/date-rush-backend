@@ -49,8 +49,9 @@ def join_queue(payload: QueueJoinRequest, db: Session = Depends(get_db)) -> Queu
     # 4. Refresh to get the latest state (might now be IN_GAME).
     db.refresh(user)
 
-    # 5. Determine room_id if the user was placed in a room.
+    # 5. Determine room_id and role if the user was placed in a room.
     room_id: int | None = None
+    role: str | None = None
     if user.state == UserState.IN_GAME:
         participant = db.execute(
             select(RoomParticipant).where(
@@ -60,9 +61,10 @@ def join_queue(payload: QueueJoinRequest, db: Session = Depends(get_db)) -> Queu
         ).scalar_one_or_none()
         if participant:
             room_id = participant.room_id
+            role = participant.role.value if participant.role else None
 
-    logger.info("User %d join_queue result: state=%s, room_id=%s", user.id, user.state.value, room_id)
-    return QueueJoinResponse(user_id=user.id, state=user.state, room_id=room_id)
+    logger.info("User %d join_queue result: state=%s, room_id=%s, role=%s", user.id, user.state.value, room_id, role)
+    return QueueJoinResponse(user_id=user.id, state=user.state, room_id=room_id, role=role)
 
 
 @router.post("/rejoin", response_model=QueueJoinResponse)

@@ -312,7 +312,10 @@ async def queue_websocket_endpoint(
                 )
             ).scalars().first()
             if participant:
-                await websocket.send_json({"type": "room_assigned", "room_id": participant.room_id})
+                role_val = participant.role.value if participant.role else "audience"
+                await websocket.send_json(
+                    {"type": "room_assigned", "room_id": participant.room_id, "role": role_val}
+                )
         elif user.state == UserState.MATCHED:
             from app.models.match import Match
             from sqlalchemy import or_
