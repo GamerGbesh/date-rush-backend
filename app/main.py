@@ -26,6 +26,12 @@ logger = logging.getLogger("app.main")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Create database tables on startup and log lifecycle."""
+    # Re-apply logging config now that uvicorn has attached its own handlers.
+    # setup_logging() runs at import time (before uvicorn starts), so the
+    # handler-stripping pass on uvicorn.* loggers is a no-op there.  Calling
+    # it again here ensures we remove uvicorn's stderr handlers and keep only
+    # our single stdout handler, preventing triple-logged access lines.
+    setup_logging(log_level=settings.LOG_LEVEL, log_format=settings.LOG_FORMAT)
     logger.info("Starting Date Rush API: Initializing database and services...")
     import asyncio
     from app.services.websocket_manager import ws_manager

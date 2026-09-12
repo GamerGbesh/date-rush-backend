@@ -41,11 +41,20 @@ def setup_logging(
     app_logger.setLevel(numeric_level)
     app_logger.propagate = True
 
-    # Ensure uvicorn loggers output through our formatted console handler
+    # Route uvicorn loggers through our formatted console handler.
+    # We must:
+    #   1. Clear any handlers uvicorn already attached (they write directly to
+    #      stderr, which the container tags as [err] even for INFO messages).
+    #   2. Add our own stdout handler so the records are formatted consistently.
+    #   3. Disable propagation so the record doesn't *also* bubble up to the
+    #      root logger and get printed a second time.
     for uvi_name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
         uvi_logger = logging.getLogger(uvi_name)
         uvi_logger.setLevel(numeric_level)
-        uvi_logger.propagate = True
+        for h in list(uvi_logger.handlers):
+            uvi_logger.removeHandler(h)
+        uvi_logger.addHandler(console_handler)
+        uvi_logger.propagate = False
 
     # Quiet overly verbose noisy third-party loggers if at INFO
     if numeric_level > logging.DEBUG:
