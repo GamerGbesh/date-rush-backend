@@ -24,7 +24,7 @@ def test_init_db_seeds_default_questions():
             session = TestingSession()
             try:
                 count = session.query(Question).count()
-                assert count == 12
+                assert count == 100
             finally:
                 session.close()
 
@@ -33,6 +33,6 @@ def test_init_db_seeds_default_questions():
             session = TestingSession()
             try:
                 count = session.query(Question).count()
-                assert count == 12
+                assert count == 100
             finally:
                 session.close()
